@@ -5,7 +5,7 @@
 // rewritten when it changes, and the minimap repaints at 10 Hz.
 import { CITY, CREW, MISSIONS, RADIO, WANTED, districtAt, rankFor } from './config.js';
 import { currentMission, nextStepLabel, objectiveLabel, stepTarget } from './missions.js';
-import { unitName } from './world.js';
+import { loadBest, unitName } from './world.js';
 
 function fmtClock(minutes) {
   const total = Math.floor(minutes);
@@ -47,7 +47,7 @@ export function createHud(state, callbacks) {
     screens: {title: $('screen-title'), pause: $('screen-pause'), wasted: $('screen-wasted'),
       busted: $('screen-busted'), complete: $('screen-complete'),
       garage: $('screen-garage'), missions: $('screen-missions')},
-    titleCash: $('title-cash'), titleMission: $('title-mission'),
+    titleCash: $('title-cash'), titleMission: $('title-mission'), titleBest: $('title-best'),
     finalCash: $('final-cash'), finalMissions: $('final-missions'),
     garageList: $('garage-list'), garageMsg: $('garage-msg'),
     missionsList: $('missions-list'),
@@ -251,6 +251,13 @@ export function createHud(state, callbacks) {
     setText('mtimer', el.missionTimer, timed ? `⏱ ${fmtTimer(state.missionTimer)}` : '');
   }
 
+  // How close a unit is decides its tactic: ramming up close, pursuit
+  // at mid range, responding from far away.
+  const TACTICS = [[10, 'RAMMING'], [40, 'PURSUIT'], [Infinity, 'RESPONDING']];
+  function tacticFor(distance) {
+    return TACTICS.find(([limit]) => distance < limit)[1];
+  }
+
   // Dispatch panel: real police units with distance + tactic.
   function updateDispatch(rico) {
     const police = state.cars.filter((c) => c.kind === 'police' && !c.disabled);
@@ -262,7 +269,7 @@ export function createHud(state, callbacks) {
     }
     for (const car of police) {
       const d = Math.round(Math.hypot(car.x - rico.x, car.z - rico.z));
-      const tactic = car.roadblock ? 'ROADBLOCK' : (d < 10 ? 'RAMMING' : (d < 40 ? 'PURSUIT' : 'RESPONDING'));
+      const tactic = car.roadblock ? 'ROADBLOCK' : tacticFor(d);
       rows.push(`<div class="unit"><span>${unitName(car)}</span><span>${d} m</span><span class="tactic">${tactic}</span></div>`);
     }
     setText('dtitle', el.dispatchTitle, rico.wanted > 0
@@ -402,6 +409,10 @@ export function createHud(state, callbacks) {
       setText('tcash', el.titleCash, `$${rico.cash.toLocaleString('en-US')}`);
       const m = currentMission(state);
       setText('tmiss', el.titleMission, m ? `Next job: ${m.title}` : 'Story complete — free roam');
+      const best = loadBest();
+      setText('tbest', el.titleBest, best && (best.cash > 0 || best.missions > 0)
+        ? `Best run: $${best.cash.toLocaleString('en-US')} · ${best.missions} / ${MISSIONS.length} jobs`
+        : '');
     }
     if (screen === 'pause') updatePauseStats();
     if (screen === 'complete') {

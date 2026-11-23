@@ -2,7 +2,7 @@
 // traffic, pedestrians, police, wanted levels, combat, missions, pickups,
 // radio, respect, crew abilities, the police helicopter, roadblocks and
 // saving. The renderer only paints this state; it never decides it.
-import { CAR, CAR_NAMES, CITY, COMBAT, CREW, MISSIONS, PEDS, PLAYER, RADIO, TRAFFIC, WANTED, WEAPONS, districtAt } from './config.js';
+import { BEST_KEY, CAR, CAR_NAMES, CITY, COMBAT, CREW, MISSIONS, PEDS, PLAYER, RADIO, TRAFFIC, WANTED, WEAPONS, districtAt } from './config.js';
 import { createRandom } from './random.js';
 import { makeCar, placeTrafficCar, stepPlayerCar, stepPoliceCar, stepTrafficCar } from './vehicles.js';
 import { knockPedDown, makePed, stepPed } from './pedestrians.js';
@@ -1023,8 +1023,33 @@ export function saveGame(state) {
     data.weapons = state.player.weapons.map((w) => ({owned: w.owned, ammo: w.ammo, mag: w.mag}));
     data.districtHeat = state.districtHeat;
     window.localStorage.setItem('solmar-bay.save.v1', JSON.stringify(data));
+    saveBest(state);
   } catch {
     // storage unavailable — the game still runs, it just cannot save
+  }
+}
+
+// Best run so far: the most cash ever held and the most jobs ever done,
+// kept across sessions so the title screen can brag about it.
+export function saveBest(state) {
+  try {
+    const prev = loadBest() || {cash: 0, missions: 0};
+    const best = {
+      cash: Math.max(prev.cash, state.player.cash),
+      missions: Math.max(prev.missions, state.missionIndex),
+    };
+    window.localStorage.setItem(BEST_KEY, JSON.stringify(best));
+  } catch {
+    // storage unavailable — the game still runs, it just cannot remember
+  }
+}
+
+export function loadBest() {
+  try {
+    const raw = window.localStorage.getItem(BEST_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
   }
 }
 
