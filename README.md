@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/gta6-01/kuningcantik-crypto/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/kuningcantik-crypto/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-A 3D open-world crime game for make.fun's **gta6-01** bounty ($1,666): twelve story missions, a live police dispatch with helicopter and roadblocks, carjacking and garage upgrades, respect ranks, radio stations, crew abilities, and full mobile controls — all in one static HTML/JS game built on three.js.
+A 3D open-world crime game built for make.fun's **gta6-01** bounty ($1,666): twelve story missions, a live police dispatch with helicopter and roadblocks, carjacking and garage upgrades, respect ranks, radio stations, crew abilities, and full mobile controls — one static HTML/JS game on three.js.
 
 <sub>Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
 
@@ -14,18 +14,18 @@ A 3D open-world crime game for make.fun's **gta6-01** bounty ($1,666): twelve st
 node serve.ts            # http://localhost:8080
 ```
 
-Or serve `game/` with any static server. Progress saves in the browser (localStorage, key `solmar-bay.save.v1`).
+Any static server works for `game/` too. Progress is stored in the browser (localStorage, key `solmar-bay.save.v1`).
 
-Add `?seed=N` to the URL to rebuild the same city and traffic every time — the screenshots and the headless tests both use seed 7.
+Pass `?seed=N` in the URL to rebuild the identical city and traffic every time — the screenshots and the headless tests both run on seed 7.
 
-## The story
+## Story
 
-You are **Rico Vane**, fresh out of the north with $120 and a name to make. Lucia has work for you: twelve jobs stand between you and the big score, from a welcome package run at the pier to a $1,200 gold heist at the bank.
+You play **Rico Vane**, fresh out of the north with $120 and a name to make. Lucia has work for you: twelve jobs between you and the big score, from a welcome package run at the pier to a $1,200 gold heist at the bank.
 
-- **Open world** — a golden-hour coastal city: plaza, bank, hotel, hospital, pier and beach, with traffic, pedestrians, a working ocean and a drifting-cloud sky.
+- **Open world** — a golden-hour coastal city with a plaza, bank, hotel, hospital, pier and beach, plus traffic, pedestrians, a working ocean and a drifting-cloud sky.
 - **Twelve story missions** — fetch, pickup, taxi, race, ram, holdout and shootout jobs, each with its own giver, dialogue and reward, plus a $1,000 story bonus at the end.
 - **Live police** — a wanted system (1–5 stars) with a real SBPD dispatch panel: named units, distances and tactics, a helicopter with a spotlight cone at 3 stars, roadblocks at 4, and busted/wasted consequences.
-- **Driving** — carjacking, seven parked cars to steal, police cruisers to disable, garage upgrades at the safehouse (engine tune, armour, repairs, ammo) that persist with Rico.
+- **Driving** — carjacking, seven parked cars to steal, police cruisers to disable, and garage upgrades at the safehouse (engine tune, armour, repairs, ammo) that persist with Rico.
 - **Combat** — seven weapons (fists to RPG) unlocked by respect rank, a respect ladder from Driver to Legend, and three crew abilities: clean plates, roadside repair, and police-vision.
 - **Radio** — five stations with named tracks, switched with C.
 - **Mobile** — a virtual joystick plus GAS / BRKE / ACT / WPN / CAM / JOBS multi-touch buttons; the HUD reflows for phones.
@@ -77,7 +77,7 @@ node tools/playtest.mjs       # desktop play
 node tools/mobile-test.mjs    # 390×844 viewport, real touch events
 ```
 
-Each test launches its own headless Chrome with a fresh profile. If a
+Every test launches its own headless Chrome with a fresh profile. If a
 run is killed mid-flight, stray Chromes can starve the VM — clean them
 up before the next batch: `pkill -f 'chrome-profile-'`.
 

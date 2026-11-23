@@ -6,15 +6,23 @@
 import { launchChrome, connect, newTab, evalJs, consoleErrors, sleep, waitFor, tapKey, screenshot } from './cdp-lib.mjs';
 
 const BASE = 'http://127.0.0.1:8080/?seed=7';
-const results = [];
+const passed = [];
 
 function check(name, ok, detail = '') {
-  results.push(ok);
+  passed.push(ok);
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`);
 }
 
 function stashProbe() {
   return `(() => { const s = window.__solmar; return {found: s.state.stashes.found, total: s.state.stashes.total, first: s.state.stashes.list[0], cash: s.state.player.cash}; })()`;
+}
+
+function weatherProbe() {
+  return `(() => { const w = window.__solmar.state.weather; return {kind: w.kind, rain: w.rain}; })()`;
+}
+
+function tramProbe() {
+  return `(() => { const t = window.__solmar.state.tram; return t.cars.map((c) => +c.along.toFixed(1)); })()`;
 }
 
 async function main() {
@@ -37,17 +45,18 @@ async function main() {
   check('walking onto a stash collects it (+$250)', after.found === 1 && after.cash === before.cash + 250, `found=${after.found} cash=${after.cash}`);
 
   // 3. Weather at 17:00 is cloudy and dry; at 19:00 it rains.
-  const wx17 = await evalJs(send, `(() => { const w = window.__solmar.state.weather; return {kind: w.kind, rain: w.rain}; })()`);
+  const wx17 = await evalJs(send, weatherProbe());
   check('weather is cloudy and dry at 17:00', wx17.kind === 'cloudy' && wx17.rain === 0, JSON.stringify(wx17));
   await evalJs(send, `window.__solmar.state.clockMinutes = 19 * 60`);
   await evalJs(send, `window.__solmar.step(600, {})`);
-  const wx19 = await evalJs(send, `(() => { const w = window.__solmar.state.weather; return {kind: w.kind, rain: +w.rain.toFixed(2)}; })()`);
-  check('weather turns to rain at 19:00', wx19.kind === 'rain' && wx19.rain > 0.3, JSON.stringify(wx19));
+  const wx19 = await evalJs(send, weatherProbe());
+  const wx19shown = {kind: wx19.kind, rain: +wx19.rain.toFixed(2)};
+  check('weather turns to rain at 19:00', wx19.kind === 'rain' && wx19.rain > 0.3, JSON.stringify(wx19shown));
 
   // 4. The trams move along the loop.
-  const tramA = await evalJs(send, `(() => { const t = window.__solmar.state.tram; return t.cars.map((c) => +c.along.toFixed(1)); })()`);
+  const tramA = await evalJs(send, tramProbe());
   await evalJs(send, `window.__solmar.step(300, {})`);
-  const tramB = await evalJs(send, `(() => { const t = window.__solmar.state.tram; return t.cars.map((c) => +c.along.toFixed(1)); })()`);
+  const tramB = await evalJs(send, tramProbe());
   const moved = tramA.every((a, i) => Math.abs(tramB[i] - a) > 20);
   check('both trams advance along the loop', moved, `before=${tramA} after=${tramB}`);
 
@@ -77,8 +86,8 @@ async function main() {
   const errs = consoleErrors(events);
   check('0 console errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   await screenshot(send, '/tmp/citylife.jpg');
-  const fails = results.filter((r) => !r).length;
-  console.log(`\nCity-life test: ${results.length - fails}/${results.length} passed.`);
+  const fails = passed.filter((r) => !r).length;
+  console.log(`\nCity-life test: ${passed.length - fails}/${passed.length} passed.`);
   process.exit(fails ? 1 : 0);
 }
 

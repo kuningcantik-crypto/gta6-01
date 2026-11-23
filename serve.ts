@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
 const portIndex = process.argv.indexOf('--port');
 const port = portIndex >= 0 ? Number(process.argv[portIndex + 1]) : 8080;
-const TYPES = {
+
+const MIME = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.mjs': 'text/javascript',
@@ -18,6 +19,11 @@ const TYPES = {
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
 };
+
+function mimeFor(file) {
+  const ext = file.slice(file.lastIndexOf('.'));
+  return MIME[ext] || 'application/octet-stream';
+}
 
 const server = createServer(async (req, res) => {
   try {
@@ -31,9 +37,8 @@ const server = createServer(async (req, res) => {
       return;
     }
     const data = await readFile(file);
-    const ext = file.slice(file.lastIndexOf('.'));
     // Dev server: never cache, so edits show up on the next reload.
-    res.writeHead(200, {'Content-Type': TYPES[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache'});
+    res.writeHead(200, {'Content-Type': mimeFor(file), 'Cache-Control': 'no-cache'});
     res.end(data);
   } catch {
     res.writeHead(404);

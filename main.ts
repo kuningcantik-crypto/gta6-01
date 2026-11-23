@@ -13,9 +13,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR
   ? resolve(process.env.MAKEFUN_OUTPUT_DIR)
   : resolve(here, 'out');
+const CAPS = {
+  text_max_bytes: 163840,
+  screenshots: {max: 4, max_bytes: 262144},
+  game_max_files: 993,
+  game_max_bytes: 50331648,
+  game_path_max_bytes: 1000,
+};
 
-async function collectShots(shotDir) {
-  const names = (await readdir(shotDir)).filter((n) => /\.jpe?g$/i.test(n)).sort();
+async function gatherShots(shotDir) {
+  const names = (await readdir(shotDir))
+    .filter((n) => /\.jpe?g$/i.test(n))
+    .sort();
   const shots = names.map((name) => join(shotDir, name));
   if (shots.length !== 4 || !shots.every((f) => existsSync(f))) {
     throw new Error(`Need exactly 4 screenshots in ${shotDir}, found ${shots.length}`);
@@ -28,20 +37,14 @@ async function build() {
   const shotDir = join(here, 'screenshots');
   const entrypoint = join(gameDir, 'src', 'main.js');
   if (!existsSync(entrypoint)) throw new Error(`Game entrypoint missing: ${entrypoint}`);
-  const shots = await collectShots(shotDir);
+  const shots = await gatherShots(shotDir);
   await mkdir(outDir, {recursive: true});
   await cp(gameDir, join(outDir, 'game'), {recursive: true});
   await cp(shotDir, join(outDir, 'screenshots'), {recursive: true});
-  const caps = {
-    text_max_bytes: 163840,
-    screenshots: {max: 4, max_bytes: 262144},
-    game_max_files: 993,
-    game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
-  };
-  const dossier = buildDossier(outDir, caps);
+  const dossier = buildDossier(outDir, CAPS);
   await writeFile(join(outDir, 'dossier.json'), dossier);
-  console.log(`Wrote dossier to ${join(outDir, 'dossier.json')} (${dossier.length} bytes, ${shots.map((f) => basename(f)).join(', ')})`);
+  const shotNames = shots.map((f) => basename(f)).join(', ');
+  console.log(`Wrote dossier to ${join(outDir, 'dossier.json')} (${dossier.length} bytes, ${shotNames})`);
 }
 
 await build();
