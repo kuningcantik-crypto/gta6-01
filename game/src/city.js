@@ -263,15 +263,72 @@ function addWaterfront(scene, rng) {
       scene.add(post);
     }
   }
-  // Moored boats.
-  for (const [x, z, color] of [[-14, 200, 0xe8e8e8], [14, 206, 0xff8a5e], [-24, 212, 0x7dd8ff]]) {
+  // Boats that cruise the bay: each is a group the renderer sails along
+  // its lane, bobbing gently. Lanes sit beyond the pier so the boats never
+  // cross the beach.
+  for (const [i, lane, speed, phase, color] of [
+    [0, 232, 2.2, 0, 0xe8e8e8],
+    [1, 242, 1.6, 90, 0xff8a5e],
+    [2, 252, 2.8, 170, 0x7dd8ff],
+  ]) {
+    const boat = new THREE.Group();
+    boat.name = 'boat-' + i;
+    boat.userData = {lane, speed, phase};
     const hull = box(3, 1.2, 8, color);
-    hull.position.set(x, 0.2, z);
-    scene.add(hull);
+    hull.position.set(0, 0.2, 0);
+    boat.add(hull);
     const cabin = box(2, 1, 3, 0xffffff);
-    cabin.position.set(x, 1.2, z);
-    scene.add(cabin);
+    cabin.position.set(0, 1.2, 0);
+    boat.add(cabin);
+    boat.position.set(phase - 130, 0, lane);
+    scene.add(boat);
   }
+}
+
+// The pier Ferris wheel: two legs, a rim with spokes, and eight cabins
+// that hang from the rim. The rim group spins in render.js; the cabins
+// counter-rotate there so they stay upright.
+function addFerrisWheel(scene) {
+  const wheel = new THREE.Group();
+  wheel.name = 'ferris-wheel';
+  wheel.position.set(0, 0, 210);
+  const legMat = new THREE.MeshLambertMaterial({color: 0xd8d8e0});
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.5, 12.5, 0.5), legMat);
+    leg.position.set(side * 2.1, 6.2, 0);
+    leg.rotation.z = -side * 0.18;
+    wheel.add(leg);
+  }
+  const rotor = new THREE.Group();
+  rotor.name = 'ferris-rotor';
+  rotor.position.set(0, 11, 0);
+  const rimMat = new THREE.MeshLambertMaterial({color: 0xff5fa2});
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(9, 0.25, 6, 32), rimMat);
+  rotor.add(rim);
+  const spokeMat = new THREE.MeshLambertMaterial({color: 0xffe9b0});
+  for (let i = 0; i < 4; i += 1) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.3, 17.6, 0.3), spokeMat);
+    spoke.rotation.z = (i * Math.PI) / 4;
+    rotor.add(spoke);
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.2, 10), spokeMat);
+  hub.rotation.x = Math.PI / 2;
+  rotor.add(hub);
+  const cabinColors = [0xff5fa2, 0xffd76e, 0x7dd8ff, 0x9dff8a];
+  const cabins = [];
+  for (let i = 0; i < 8; i += 1) {
+    const a = (i / 8) * Math.PI * 2;
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(1.7, 1.4, 1.4),
+      new THREE.MeshLambertMaterial({color: cabinColors[i % cabinColors.length]}),
+    );
+    cabin.position.set(Math.cos(a) * 9, Math.sin(a) * 9, 0);
+    rotor.add(cabin);
+    cabins.push(cabin);
+  }
+  rotor.userData.cabins = cabins;
+  wheel.add(rotor);
+  scene.add(wheel);
 }
 
 function addPlaza(scene) {
@@ -324,6 +381,7 @@ export function buildCity(scene, rng) {
   addPalms(scene, rng);
   addLamps(scene);
   addWaterfront(scene, rng);
+  addFerrisWheel(scene);
   addPlaza(scene);
   const clouds = addClouds(scene, rng);
   return {colliders, clouds};

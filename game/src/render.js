@@ -164,6 +164,27 @@ function syncBeacon(beacon, diamond, state, dt) {
   diamond.position.y = 8 + Math.sin(state.time * 2) * 0.5;
 }
 
+// The waterfront moves: the wheel turns (cabins stay upright) and the
+// boats sail their lanes, bobbing on the swell.
+function syncWaterfront(scene, time) {
+  const rotor = scene.getObjectByName('ferris-rotor');
+  if (rotor) {
+    rotor.rotation.z = time * 0.12;
+    for (const cabin of rotor.userData.cabins || []) cabin.rotation.z = -rotor.rotation.z;
+  }
+  for (let i = 0; i < 3; i += 1) {
+    const boat = scene.getObjectByName('boat-' + i);
+    if (!boat) continue;
+    const {lane, speed, phase} = boat.userData;
+    const span = 260;
+    const x = (((time * speed + phase) % span) + span) % span - span / 2;
+    boat.position.x = x;
+    boat.position.z = lane;
+    boat.rotation.z = Math.sin(time * 0.8 + phase) * 0.03;
+    boat.rotation.x = Math.sin(time * 0.6 + phase * 2) * 0.02;
+  }
+}
+
 function syncHeli(heli, pool, state) {
   const h = state.heli;
   heli.visible = !!h.active;
@@ -439,6 +460,7 @@ export function createRenderer(canvas, state) {
       syncPickups(pickupFigures, state.pickups, state.time, dt);
       syncBeacon(beacon, diamond, state, dt);
       syncHeli(heli, heli.userData.pool, state);
+      syncWaterfront(scene, state.time);
       // Ocean shimmer and drifting clouds.
       const ocean = scene.getObjectByName('ocean');
       if (ocean) ocean.position.y = -0.4 + Math.sin(state.time * 0.5) * 0.1;

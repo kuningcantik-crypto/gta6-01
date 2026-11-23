@@ -74,6 +74,7 @@
   #dialogue-name { color: #ffd76e; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
   #dialogue-text { font-size: 14px; font-weight: 600; line-height: 1.4; }
   #message { position: absolute; bottom: 260px; left: 50%; transform: translateX(-50%); font-size: 17px; font-weight: 600; text-align: center; opacity: 0; transition: opacity .3s; }
+  #ticker { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 640px; max-width: 92%; padding: 6px 12px; border-radius: 4px; background: rgba(10, 16, 28, .72); color: #ffd76e; font-size: 12px; font-weight: 600; letter-spacing: .4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #crosshair { position: absolute; top: 50%; left: 50%; display: none; width: 14px; height: 14px; margin: -7px 0 0 -7px; }
   #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; }
   #crosshair::before { top: 0; left: 6px; width: 2px; height: 14px; }
@@ -88,6 +89,7 @@
   #screen-title { background: linear-gradient(180deg, rgba(10,16,40,.18), rgba(10,16,40,.55)); }
   .screen h1 { margin: 0; color: #ffd76e; font-size: 64px; letter-spacing: 4px; text-shadow: 0 4px 24px rgba(0,0,0,.6); }
   .screen h2 { margin: 0; color: #ffd76e; font-size: 40px; }
+  .stats { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 16px; padding: 12px 18px; border: 1px solid rgba(255, 215, 110, .35); border-radius: 8px; background: rgba(10, 16, 28, .55); color: #dfe6ee; font-size: 14px; font-weight: 600; text-align: left; }
   .screen p { max-width: 560px; padding: 0 20px; font-size: 17px; line-height: 1.55; }
   .screen .sub { color: #ffd76e; font-weight: 700; letter-spacing: 2px; }
   .btn { margin: 6px; padding: 13px 30px; border: none; border-radius: 10px; background: #ffd76e; color: #1b2b4a; font-size: 17px; font-weight: 700; cursor: pointer; pointer-events: auto; }
@@ -172,6 +174,7 @@
   <div id="radio-line"></div>
   <div id="dialogue" class="panel"><div id="dialogue-portrait">L</div><div><div id="dialogue-name"></div><div id="dialogue-text"></div></div></div>
   <div id="message"></div>
+  <div id="ticker">SOLMAR WIRE — SBPD: "Report suspicious vans. Reward $150."</div>
   <div id="crosshair"></div>
   <div id="flash"><div id="flash-title"></div><div id="flash-reward"></div></div>
   <div id="controls">WASD drive / walk &nbsp;·&nbsp; E enter car &nbsp;·&nbsp; Click shoot &nbsp;·&nbsp; F punch<br>1–7 weapons · Q cycle · C radio · Z/X/V crew · G garage · M jobs<br>R reload &nbsp;·&nbsp; Space jump &nbsp;·&nbsp; Shift run &nbsp;·&nbsp; Esc pause</div>
@@ -202,6 +205,7 @@
 <div id="screen-pause" class="screen">
   <h2>Paused</h2>
   <p>Solmar Bay waits for no one — except right now.</p>
+  <div id="pause-stats" class="stats"></div>
   <div><button id="btn-resume" class="btn">Resume</button>
   <button id="btn-title" class="btn secondary">Main Menu</button></div>
 </div>

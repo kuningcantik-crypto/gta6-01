@@ -83,6 +83,12 @@ function spawnPickups(state) {
   for (const [x, z] of spots) state.pickups.push({x, z, taken: false, respawn: 0});
 }
 
+// Lifetime numbers for the pause screen: money and respect earned,
+// how far Rico has travelled, and what he has wrecked along the way.
+function newStats() {
+  return {cashEarned: 0, rpEarned: 0, pedsDown: 0, copsWrecked: 0, shotsFired: 0, missionsDone: 0, timePlayed: 0, distanceKm: 0, lastX: null, lastZ: null};
+}
+
 export function createWorld(seed) {
   const rng = createRandom(seed);
   const state = {
@@ -117,6 +123,7 @@ export function createWorld(seed) {
     events: [],
     garageOpen: false,
     missionsOpen: false,
+    stats: newStats(),
   };
   spawnParkedCars(state, rng);
   spawnTraffic(state, rng);
@@ -144,6 +151,7 @@ export function addWanted(state, stars, audio) {
 // feed and car damage each have one place that changes them.
 function grantCash(state, amount) {
   state.player.cash += amount;
+  state.stats.cashEarned += amount;
 }
 function spendCash(state, amount) {
   state.player.cash -= amount;
@@ -153,6 +161,7 @@ function fineCash(state, amount) {
 }
 function grantRp(state, amount) {
   state.player.rp += amount;
+  state.stats.rpEarned += amount;
 }
 function pushMessage(state, text) {
   state.events.push({type: 'message', text});
@@ -317,6 +326,7 @@ function wreckCruiser(state, car, audio) {
   if (car.disabled) return;
   car.disabled = true;
   car.speed = 0;
+  state.stats.copsWrecked += 1;
   spawnFx(state, car.x, 1, car.z, 'explosion');
   grantCash(state, 50);
   grantRp(state, 25);
@@ -390,6 +400,7 @@ function openFire(state, camYaw, audio) {
     return;
   }
   weapon.mag -= 1;
+  state.stats.shotsFired += 1;
   rico.shootTimer = weapon.cooldown;
   if (audio) audio.shot();
   const range = weapon.id === 'sniper' ? 120 : COMBAT.range;
@@ -567,6 +578,11 @@ function tickSteps(state, audio) {
 function stepTimers(state, dt) {
   const rico = state.player;
   state.time += dt;
+  state.stats.timePlayed += dt;
+  const moved = Math.hypot(rico.x - (state.stats.lastX ?? rico.x), rico.z - (state.stats.lastZ ?? rico.z));
+  state.stats.distanceKm += moved / 1000;
+  state.stats.lastX = rico.x;
+  state.stats.lastZ = rico.z;
   state.clockMinutes += dt / 10;
   state.events = [];
   rico.shootTimer = Math.max(0, rico.shootTimer - dt);
@@ -766,6 +782,7 @@ function checkPedHits(state, audio, beforeSpeed) {
     if (ped.state === 'down') continue;
     if (Math.hypot(ped.x - rico.x, ped.z - rico.z) >= 2 || beforeSpeed <= 5) continue;
     knockPedDown(ped);
+    state.stats.pedsDown += 1;
     addWanted(state, 1, audio);
     pushMessage(state, 'You hit a pedestrian!');
   }

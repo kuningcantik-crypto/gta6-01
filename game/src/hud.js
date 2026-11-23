@@ -42,6 +42,7 @@ export function createHud(state, callbacks) {
     dialogue: $('dialogue'), dialoguePortrait: $('dialogue-portrait'),
     dialogueName: $('dialogue-name'), dialogueText: $('dialogue-text'),
     message: $('message'), minimap: $('minimap'), crosshair: $('crosshair'),
+    ticker: $('ticker'), pauseStats: $('pause-stats'),
     flash: $('flash'), flashTitle: $('flash-title'), flashReward: $('flash-reward'),
     screens: {title: $('screen-title'), pause: $('screen-pause'), wasted: $('screen-wasted'),
       busted: $('screen-busted'), complete: $('screen-complete'),
@@ -54,6 +55,20 @@ export function createHud(state, callbacks) {
   const mapCtx = el.minimap.getContext('2d');
   let messageTimer = 0;
   let mapTimer = 0;
+  // Solmar Bay wire: rotating city news and street tips along the bottom
+  // of the screen, a fresh line every six seconds of play.
+  const TICKER_LINES = [
+    'SOLMAR WIRE — SBPD: "Report suspicious vans. Reward $150."',
+    'SOLMAR WIRE — Pier Ferris wheel reopens Friday. Free rides for crew.',
+    'SOLMAR WIRE — Lucia Voss seen at the Grand Solmar. "Just visiting."',
+    'SOLMAR WIRE — Street race at the pier tonight. SBPD will be watching.',
+    'SOLMAR WIRE — Tip: hold Shift to sprint, Space to jump a fence.',
+    'SOLMAR WIRE — The Gold Rush job pays $1,200. Ask Lucia at the pier.',
+    'SOLMAR WIRE — Ferry to Isla Verde delayed again. Locals not surprised.',
+    'SOLMAR WIRE — Respect opens doors: new guns at 250, 600, 1,200 RP.',
+  ];
+  let tickerIndex = 0;
+  let tickerTimer = 6;
   const cache = {};
   // Diagnostics handle for headless tests (backdrop-guard timing).
   window.__hudCache = cache;
@@ -111,6 +126,16 @@ export function createHud(state, callbacks) {
     for (const col of state.colliders) {
       const [x, y] = toMap(col.x0, col.z0);
       mapCtx.fillRect(x, y, (col.x1 - col.x0) * scale, (col.z1 - col.z0) * scale);
+    }
+    // Heat glow: the hotter Rico's current district, the wider the red
+    // haze around him on the map.
+    const heat = state.districtHeat[districtAt(state.player.x, state.player.z).name] || 0;
+    if (heat > 0) {
+      const [hx, hy] = toMap(state.player.x, state.player.z);
+      mapCtx.fillStyle = 'rgba(255, 68, 68, ' + Math.min(0.35, heat / 300) + ')';
+      mapCtx.beginPath();
+      mapCtx.arc(hx, hy, 8 + heat * 0.25, 0, Math.PI * 2);
+      mapCtx.fill();
     }
     // Police search zone (Eyes Out reveal) — a red dashed ring around Rico.
     if (state.player.eyesTimer > 0) {
@@ -310,6 +335,28 @@ export function createHud(state, callbacks) {
   }
 
   // Minimap (10 Hz), the visible screen, and the overlay contents.
+  function updateTicker(dt) {
+    if (!el.ticker) return;
+    tickerTimer -= dt;
+    if (tickerTimer > 0) return;
+    tickerTimer = 6;
+    tickerIndex = (tickerIndex + 1) % TICKER_LINES.length;
+    setText('ticker', el.ticker, TICKER_LINES[tickerIndex]);
+  }
+
+  // Lifetime numbers on the pause screen, from state.stats.
+  function updatePauseStats() {
+    if (!el.pauseStats || !state.stats) return;
+    const s = state.stats;
+    const minutes = Math.floor(s.timePlayed / 60);
+    const seconds = Math.floor(s.timePlayed % 60).toString().padStart(2, '0');
+    setHtml('pstats', el.pauseStats,
+      '<div>Jobs done: ' + s.missionsDone + ' / ' + MISSIONS.length + '</div>' +
+      '<div>Cash earned: $' + s.cashEarned.toLocaleString('en-US') + ' · Respect earned: ' + s.rpEarned + ' RP</div>' +
+      '<div>Distance: ' + s.distanceKm.toFixed(1) + ' km · Time: ' + minutes + ':' + seconds + '</div>' +
+      '<div>Shots fired: ' + s.shotsFired + ' · Cruisers wrecked: ' + s.copsWrecked + ' · Pedestrians down: ' + s.pedsDown + '</div>');
+  }
+
   function updateScreens(dt, screen) {
     const rico = state.player;
     // Minimap at 10 Hz — full-rate 2D painting is wasted work. Always draw
@@ -356,6 +403,7 @@ export function createHud(state, callbacks) {
       const m = currentMission(state);
       setText('tmiss', el.titleMission, m ? `Next job: ${m.title}` : 'Story complete — free roam');
     }
+    if (screen === 'pause') updatePauseStats();
     if (screen === 'complete') {
       setText('fcash', el.finalCash, `$${rico.cash.toLocaleString('en-US')}`);
       setText('fmiss', el.finalMissions, `${state.missionIndex} / ${MISSIONS.length} jobs done`);
@@ -375,6 +423,7 @@ export function createHud(state, callbacks) {
     updateCrewAndDistrict(rico);
     updateCarAndRadio(rico, screen);
     updateDialogueAndFlash(dt);
+    updateTicker(dt);
     updateScreens(dt, screen);
   }
 
