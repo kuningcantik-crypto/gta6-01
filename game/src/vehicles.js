@@ -34,20 +34,15 @@ export function makeCarMesh(color, isPolice) {
     group.add(lamp);
   }
   if (isPolice) {
-    const red = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 0.16, 0.4),
-      new THREE.MeshBasicMaterial({color: 0xff2222}),
-    );
-    red.position.set(0, 1.55, -0.2);
-    red.name = 'lightbar';
-    group.add(red);
-    const blue = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 0.16, 0.4),
-      new THREE.MeshBasicMaterial({color: 0x2244ff}),
-    );
-    blue.position.set(0, 1.55, -0.2);
-    blue.name = 'lightbar2';
-    group.add(blue);
+    for (const [color, name] of [[0xff2222, 'lightbar'], [0x2244ff, 'lightbar2']]) {
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.16, 0.4),
+        new THREE.MeshBasicMaterial({color}),
+      );
+      bar.position.set(0, 1.55, -0.2);
+      bar.name = name;
+      group.add(bar);
+    }
   }
   group.userData.wheels = wheels;
   return group;
@@ -97,50 +92,65 @@ export function stepTrafficCar(vehicle, dt, rng) {
   if (nearRoad !== undefined && rng.next() < dt * 0.25) {
     vehicle.angle += rng.next() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
   }
-  // Wrap around the city edge instead of driving into the ocean.
-  if (vehicle.x > CITY.half) {
-    vehicle.x = CITY.half;
-    vehicle.angle = Math.PI;
-  }
-  if (vehicle.x < -CITY.half) {
-    vehicle.x = -CITY.half;
-    vehicle.angle = 0;
-  }
-  if (vehicle.z > CITY.half) {
-    vehicle.z = CITY.half;
-    vehicle.angle = -Math.PI / 2;
-  }
-  if (vehicle.z < -CITY.half) {
-    vehicle.z = -CITY.half;
-    vehicle.angle = Math.PI / 2;
+  // Wrap around the city edge instead of driving into the ocean: each
+  // row is [axis, edge, angle to turn to when past it].
+  for (const [axis, edge, turn] of [
+    ['x', CITY.half, Math.PI],
+    ['x', -CITY.half, 0],
+    ['z', CITY.half, -Math.PI / 2],
+    ['z', -CITY.half, Math.PI / 2],
+  ]) {
+    const past = edge > 0 ? vehicle[axis] > edge : vehicle[axis] < edge;
+    if (past) {
+      vehicle[axis] = edge;
+      vehicle.angle = turn;
+    }
   }
 }
 
 // Arcade driving physics for the player's vehicle. Returns true on a hard hit.
 // `tune` is the garage engine level (0–3): +12% top speed per level.
-// A wrecked vehicle (low condition) loses top speed too.
-export function stepPlayerCar(vehicle, input, dt, collide, tune) {
-  const gas = input.held.up ? 1 : 0;
-  const brake = input.held.down ? 1 : 0;
-  const steerInput = (input.held.left ? 1 : 0) - (input.held.right ? 1 : 0);
-  const condition = (vehicle.condition ?? 100) / 100;
-  const topSpeed = CAR.maxSpeed * (1 + 0.12 * (tune || 0)) * (0.55 + 0.45 * condition);
+// Gas, brake and coasting: speed chases the top speed the car's
+// condition and garage tune allow. A wrecked vehicle loses top speed too.
+function applyPedals(vehicle, gas, brake, dt, topSpeed) {
   if (gas) vehicle.speed += CAR.accel * dt;
   if (brake) vehicle.speed -= (vehicle.speed > 0.5 ? CAR.brake : CAR.reverseAccel) * dt;
   if (!gas && !brake) vehicle.speed -= Math.sign(vehicle.speed) * CAR.grip * dt * 0.6;
   if (Math.abs(vehicle.speed) < 0.2 && !gas && !brake) vehicle.speed = 0;
   vehicle.speed = Math.max(-CAR.maxReverse, Math.min(topSpeed, vehicle.speed));
-  const steerAmount = steerInput * CAR.steer * dt * Math.min(1, Math.abs(vehicle.speed) / 6) * Math.sign(vehicle.speed || 1);
-  vehicle.angle += steerAmount;
+}
+
+// Steering bites harder the faster the car goes, and reverses with it.
+function applySteering(vehicle, steerInput, dt) {
+  const bite = Math.min(1, Math.abs(vehicle.speed) / 6) * Math.sign(vehicle.speed || 1);
+  vehicle.angle += steerInput * CAR.steer * dt * bite;
+}
+
+// Move along the heading; a wall stops the car dead instead of letting it
+// phase through. Returns true on a hard hit.
+function moveVehicle(vehicle, dt, collide, radius) {
   const nx = vehicle.x + Math.sin(vehicle.angle) * vehicle.speed * dt;
   const nz = vehicle.z + Math.cos(vehicle.angle) * vehicle.speed * dt;
-  const hit = collide(nx, nz, CAR.radius);
+  const hit = collide(nx, nz, radius);
   if (hit) vehicle.speed *= 0.3;
   else {
     vehicle.x = nx;
     vehicle.z = nz;
   }
   return hit && Math.abs(vehicle.speed) > 4;
+}
+
+// Arcade driving physics for the player's vehicle. Returns true on a hard hit.
+// `tune` is the garage engine level (0-3): +12% top speed per level.
+export function stepPlayerCar(vehicle, input, dt, collide, tune) {
+  const gas = input.held.up ? 1 : 0;
+  const brake = input.held.down ? 1 : 0;
+  const steerInput = (input.held.left ? 1 : 0) - (input.held.right ? 1 : 0);
+  const condition = (vehicle.condition ?? 100) / 100;
+  const topSpeed = CAR.maxSpeed * (1 + 0.12 * (tune || 0)) * (0.55 + 0.45 * condition);
+  applyPedals(vehicle, gas, brake, dt, topSpeed);
+  applySteering(vehicle, steerInput, dt);
+  return moveVehicle(vehicle, dt, collide, CAR.radius);
 }
 
 // A police vehicle steers toward the player and rams — but it respects the
@@ -155,7 +165,12 @@ export function stepPoliceCar(vehicle, targetX, targetZ, dt, collide) {
   while (diff > Math.PI) diff -= Math.PI * 2;
   while (diff < -Math.PI) diff += Math.PI * 2;
   vehicle.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
-  const cruise = dist < 6 ? 4 : dist > 30 ? 26 : 20;
+  // How fast the cruiser closes in, by distance: crawl once it has
+  // caught up, cruise at mid range, flat out from far away. Each row is
+  // [comparison, limit, speed]; past the last row it runs flat out.
+  const CRUISE = [['<', 6, 4], ['<=', 30, 20]];
+  const match = CRUISE.find(([op, limit]) => (op === '<' ? dist < limit : dist <= limit));
+  const cruise = match ? match[2] : 26;
   vehicle.speed += (cruise - vehicle.speed) * dt * 1.2;
   const nx = vehicle.x + Math.sin(vehicle.angle) * vehicle.speed * dt;
   const nz = vehicle.z + Math.cos(vehicle.angle) * vehicle.speed * dt;

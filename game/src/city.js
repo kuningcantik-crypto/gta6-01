@@ -331,6 +331,50 @@ function addFerrisWheel(scene) {
   scene.add(wheel);
 }
 
+
+// The pier lighthouse: a striped tower with a lamp room, and a beam on a
+// pivot the renderer sweeps across the bay.
+function addLighthouse(scene) {
+  const tower = new THREE.Group();
+  tower.name = 'lighthouse';
+  tower.position.set(6, 0, 208);
+  const stripeA = new THREE.MeshLambertMaterial({color: 0xf2e3c6});
+  const stripeB = new THREE.MeshLambertMaterial({color: 0xd93a2b});
+  for (let i = 0; i < 5; i += 1) {
+    const seg = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.6 - i * 0.12, 1.8 - i * 0.12, 2.4, 10),
+      i % 2 ? stripeB : stripeA,
+    );
+    seg.position.y = 1.2 + i * 2.4;
+    tower.add(seg);
+  }
+  const lampRoom = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.1, 1.1, 1.6, 10),
+    new THREE.MeshLambertMaterial({color: 0x1a2733}),
+  );
+  lampRoom.position.y = 13.2;
+  tower.add(lampRoom);
+  const lamp = new THREE.Mesh(
+    new THREE.SphereGeometry(0.7, 10, 8),
+    new THREE.MeshBasicMaterial({color: 0xfff2b0}),
+  );
+  lamp.position.y = 13.2;
+  tower.add(lamp);
+  // The beam: a translucent cone, apex at the lamp, sweeping with its pivot.
+  const pivot = new THREE.Group();
+  pivot.name = 'lighthouse-beam-pivot';
+  pivot.position.set(0, 13.2, 0);
+  const beam = new THREE.Mesh(
+    new THREE.ConeGeometry(3.5, 26, 12, 1, true),
+    new THREE.MeshBasicMaterial({color: 0xfff2b0, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false}),
+  );
+  beam.rotation.z = Math.PI / 2;
+  beam.position.set(13, 0, 0);
+  pivot.add(beam);
+  tower.add(pivot);
+  scene.add(tower);
+}
+
 function addPlaza(scene) {
   // Central plaza: a paved disc with a fountain, kept open for the action.
   const disc = new THREE.Mesh(
@@ -382,6 +426,7 @@ export function buildCity(scene, rng) {
   addLamps(scene);
   addWaterfront(scene, rng);
   addFerrisWheel(scene);
+  addLighthouse(scene);
   addPlaza(scene);
   const clouds = addClouds(scene, rng);
   return {colliders, clouds};

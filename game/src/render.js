@@ -299,6 +299,7 @@ export function createRenderer(canvas, state) {
   scene.add(fill);
 
   const city = buildCity(scene, state.rng);
+  const beamPivot = scene.getObjectByName('lighthouse-beam-pivot');
   state.colliders = city.colliders;
 
   const playerFigure = makePlayerMesh();
@@ -430,6 +431,7 @@ export function createRenderer(canvas, state) {
     (p, dt) => syncBeacon(beacon, diamond, state, dt),
     (p, dt) => syncHeli(heli, heli.userData.pool, state),
     () => syncWaterfront(scene, state.time),
+    () => { if (beamPivot) beamPivot.rotation.y = state.time * 0.5; },
   ];
 
   return {
