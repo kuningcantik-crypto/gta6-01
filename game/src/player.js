@@ -40,31 +40,23 @@ export function makePlayerMesh() {
   return group;
 }
 
-// On-foot movement: WASD relative to the camera yaw, Shift to run, Space
-// to jump. Axis-separated collision so Rico slides along walls.
-export function stepPlayerOnFoot(rico, input, dt, cameraYaw, collide) {
+// WASD relative to the camera yaw, normalised so diagonals are not
+// faster than straight lines. Returns the direction and whether Rico is
+// moving at all.
+function moveDirection(input, cameraYaw) {
   const forward = (input.held.up ? 1 : 0) - (input.held.down ? 1 : 0);
   const strafe = (input.held.right ? 1 : 0) - (input.held.left ? 1 : 0);
-  const running = !!input.held.run;
-  const speed = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
-  let mx = 0;
-  let mz = 0;
-  if (forward || strafe) {
-    const sin = Math.sin(cameraYaw);
-    const cos = Math.cos(cameraYaw);
-    mx = sin * forward + cos * strafe;
-    mz = cos * forward - sin * strafe;
-    const len = Math.hypot(mx, mz) || 1;
-    mx /= len;
-    mz /= len;
-    rico.angle = Math.atan2(mx, mz);
-  }
-  const nx = rico.x + mx * speed * dt;
-  const nz = rico.z + mz * speed * dt;
-  if (!collide(nx, rico.z, PLAYER.radius)) rico.x = nx;
-  if (!collide(rico.x, nz, PLAYER.radius)) rico.z = nz;
-  rico.moving = !!(forward || strafe);
-  rico.running = running && rico.moving;
+  if (!forward && !strafe) return {mx: 0, mz: 0, moving: false};
+  const sin = Math.sin(cameraYaw);
+  const cos = Math.cos(cameraYaw);
+  const mx = sin * forward + cos * strafe;
+  const mz = cos * forward - sin * strafe;
+  const len = Math.hypot(mx, mz) || 1;
+  return {mx: mx / len, mz: mz / len, moving: true};
+}
+
+// Gravity and jumping: Space launches Rico, the ground catches him.
+function stepJump(rico, input, dt) {
   if (input.wasPressed('jump') && rico.y <= 0.01) rico.vy = PLAYER.jumpSpeed;
   rico.vy -= PLAYER.gravity * dt;
   rico.y += rico.vy * dt;
@@ -72,5 +64,21 @@ export function stepPlayerOnFoot(rico, input, dt, cameraYaw, collide) {
     rico.y = 0;
     rico.vy = 0;
   }
-  rico.walkPhase = (rico.walkPhase || 0) + dt * speed * (rico.moving ? 1.6 : 0);
+}
+
+// On-foot movement: WASD relative to the camera yaw, Shift to run, Space
+// to jump. Axis-separated collision so Rico slides along walls.
+export function stepPlayerOnFoot(rico, input, dt, cameraYaw, collide) {
+  const running = !!input.held.run;
+  const speed = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
+  const {mx, mz, moving} = moveDirection(input, cameraYaw);
+  if (moving) rico.angle = Math.atan2(mx, mz);
+  const nx = rico.x + mx * speed * dt;
+  const nz = rico.z + mz * speed * dt;
+  if (!collide(nx, rico.z, PLAYER.radius)) rico.x = nx;
+  if (!collide(rico.x, nz, PLAYER.radius)) rico.z = nz;
+  rico.moving = moving;
+  rico.running = running && moving;
+  stepJump(rico, input, dt);
+  rico.walkPhase = (rico.walkPhase || 0) + dt * speed * (moving ? 1.6 : 0);
 }

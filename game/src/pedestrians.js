@@ -48,22 +48,35 @@ export function makePed(rng) {
   };
 }
 
-// Walk the sidewalk; at a crossing, sometimes turn onto the other one.
-export function stepPed(walker, dt, rng, danger) {
-  if (walker.state === 'down') {
+// Pedestrian states: each handler runs when the ped is in that state and
+// returns true when it handled the step (a down ped does not move). A ped
+// that stops fleeing keeps its running speed until it is knocked down.
+const PED_STATES = {
+  down(walker, dt) {
     walker.downTimer -= dt;
     if (walker.downTimer <= 0) {
       walker.state = 'walk';
       walker.speed = PEDS.walkSpeed;
     }
-    return;
-  }
-  if (danger && walker.state !== 'flee') {
+    return true;
+  },
+  flee(walker, dt, rng, danger) {
+    if (!danger) walker.state = 'walk';
+    return false;
+  },
+  walk(walker, dt, rng, danger) {
+    if (!danger) return false;
     walker.state = 'flee';
     walker.speed = PEDS.fleeSpeed;
     walker.angle = Math.atan2(walker.x - danger.x, walker.z - danger.z);
-  }
-  if (walker.state === 'flee' && !danger) walker.state = 'walk';
+    return false;
+  },
+};
+
+// Walk the sidewalk; at a crossing, sometimes turn onto the other one.
+export function stepPed(walker, dt, rng, danger) {
+  const handler = PED_STATES[walker.state];
+  if (handler && handler(walker, dt, rng, danger)) return;
   const speed = walker.state === 'flee' ? PEDS.fleeSpeed : walker.speed;
   walker.x += Math.sin(walker.angle) * speed * dt;
   walker.z += Math.cos(walker.angle) * speed * dt;
