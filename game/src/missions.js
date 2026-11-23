@@ -1,6 +1,7 @@
-// The mission machine: which mission Rico is on, which step of it, where the
-// beacon should point, and what the HUD should say. It only reads state and
-// moves the mission counters — it never touches the renderer or the input.
+// The mission machine: which mission Rico is on, which step of it, where
+// the beacon should point, and what the HUD should say. It only reads
+// state and moves the mission counters — it never touches the renderer or
+// the input.
 import { MISSIONS } from './config.js';
 
 export function currentMission(state) {
@@ -13,61 +14,51 @@ export function currentStep(state) {
   return mission.steps[state.missionStep] || null;
 }
 
-// How each step kind points the beacon and phrases the objective. Kinds
-// not listed here use the plain rule: point at step.pos, show step.label.
-const STEP_KIND = {
-  collect: {
-    target(state, step) {
-      const spot = (step.spots || [])[state.missionCollected || 0];
-      return spot ? {x: spot.x, z: spot.z, label: step.label} : null;
-    },
-    objective(state, mission, step) {
-      const shown = step.label.replace(/\(\d+\/\d+\)/, `(${state.missionCollected || 0}/${step.count})`);
-      return `${mission.title}: ${shown}`;
-    },
-  },
-  race: {
-    target(state, step) {
-      const gate = (step.checkpoints || [])[state.raceIndex || 0];
-      return gate ? {x: gate.x, z: gate.z, label: step.label} : null;
-    },
-    objective(state, mission, step) {
-      const total = (step.checkpoints || []).length;
-      return `${mission.title}: Race the Neon circuit (${state.raceIndex || 0}/${total} gates)`;
-    },
-  },
-  ram: {
-    target(state, step) {
-      if (state.targetCar) return {x: state.targetCar.x, z: state.targetCar.z, label: step.label};
-      return step.pos ? {x: step.pos.x, z: step.pos.z, label: step.label} : null;
-    },
-  },
-  eliminate: {
-    objective(state, mission, step) {
-      return `${mission.title}: Disable police cars (${state.eliminated || 0}/${step.count})`;
-    },
-  },
-};
-
-// Where the beacon should point for the step in progress, or null when the
-// step has no place on the map.
+// Where the beacon should point for the step in progress, or null when
+// the step has no place on the map. Collect steps point at the next
+// uncollected spot, race steps at the next gate, ram steps follow the
+// courier car, and every other kind points at its own position.
 export function stepTarget(state) {
   const step = currentStep(state);
   if (!step) return null;
-  const kind = STEP_KIND[step.kind];
-  if (kind && kind.target) return kind.target(state, step);
+  if (step.kind === 'collect') {
+    const spot = (step.spots || [])[state.missionCollected || 0];
+    return spot ? {x: spot.x, z: spot.z, label: step.label} : null;
+  }
+  if (step.kind === 'race') {
+    const gate = (step.checkpoints || [])[state.raceIndex || 0];
+    return gate ? {x: gate.x, z: gate.z, label: step.label} : null;
+  }
+  if (step.kind === 'ram' && state.targetCar) {
+    return {x: state.targetCar.x, z: state.targetCar.z, label: step.label};
+  }
   if (step.pos) return {x: step.pos.x, z: step.pos.z, label: step.label};
   return null;
 }
 
-// The objective line the HUD shows for the step in progress.
+// The objective line the HUD shows for the step in progress. Counted
+// steps (collect, race, eliminate) show live progress; the rest show the
+// step's own label.
+function formatObjective(state, mission, step) {
+  if (step.kind === 'collect') {
+    const shown = step.label.replace(/\(\d+\/\d+\)/, `(${state.missionCollected || 0}/${step.count})`);
+    return `${mission.title}: ${shown}`;
+  }
+  if (step.kind === 'race') {
+    const total = (step.checkpoints || []).length;
+    return `${mission.title}: Race the Neon circuit (${state.raceIndex || 0}/${total} gates)`;
+  }
+  if (step.kind === 'eliminate') {
+    return `${mission.title}: Disable police cars (${state.eliminated || 0}/${step.count})`;
+  }
+  return `${mission.title}: ${step.label}`;
+}
+
 export function objectiveLabel(state) {
   const mission = currentMission(state);
   const step = currentStep(state);
   if (!mission || !step) return 'Solmar Bay is yours. Free roam — cause chaos or enjoy the sunset.';
-  const kind = STEP_KIND[step.kind];
-  if (kind && kind.objective) return kind.objective(state, mission, step);
-  return `${mission.title}: ${step.label}`;
+  return formatObjective(state, mission, step);
 }
 
 // The step after this one, for the HUD's NEXT line.
@@ -105,8 +96,9 @@ export function startStep(state) {
   }
 }
 
-// Move the mission machine one step on. Returns 'step' when a step completes,
-// 'mission' when a whole mission completes, 'done' when the story ends.
+// Move the mission machine one step on. Returns 'step' when a step
+// completes, 'mission' when a whole mission completes, 'done' when the
+// story ends.
 export function advanceMission(state) {
   const mission = currentMission(state);
   if (!mission) return null;

@@ -6,46 +6,46 @@ import { CAR, CITY, PALETTE } from './config.js';
 
 // A low-poly vehicle from boxes: body, cabin, four wheels, headlights.
 export function makeCarMesh(color, isPolice) {
-  const group = new THREE.Group();
+  const car = new THREE.Group();
   const paint = new THREE.MeshLambertMaterial({color: isPolice ? PALETTE.police : color});
   const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.65, 4.4), paint);
   body.position.y = 0.55;
   body.castShadow = true;
-  group.add(body);
+  car.add(body);
   const glass = new THREE.MeshLambertMaterial({color: 0x1a2733});
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 2.2), glass);
   cabin.position.set(0, 1.15, -0.2);
   cabin.castShadow = true;
-  group.add(cabin);
+  car.add(cabin);
   const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 10);
-  const wheelMat = new THREE.MeshLambertMaterial({color: 0x111111});
+  const tyre = new THREE.MeshLambertMaterial({color: 0x111111});
   const wheels = [];
   for (const [x, z] of [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]]) {
-    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    const wheel = new THREE.Mesh(wheelGeo, tyre);
     wheel.rotation.z = Math.PI / 2;
     wheel.position.set(x, 0.38, z);
-    group.add(wheel);
+    car.add(wheel);
     wheels.push(wheel);
   }
   const lampMat = new THREE.MeshBasicMaterial({color: 0xfff2b0});
   for (const x of [-0.6, 0.6]) {
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), lampMat);
     lamp.position.set(x, 0.6, 2.22);
-    group.add(lamp);
+    car.add(lamp);
   }
   if (isPolice) {
-    for (const [color, name] of [[0xff2222, 'lightbar'], [0x2244ff, 'lightbar2']]) {
+    for (const [barColor, barName] of [[0xff2222, 'lightbar'], [0x2244ff, 'lightbar2']]) {
       const bar = new THREE.Mesh(
         new THREE.BoxGeometry(1.1, 0.16, 0.4),
-        new THREE.MeshBasicMaterial({color}),
+        new THREE.MeshBasicMaterial({color: barColor}),
       );
       bar.position.set(0, 1.55, -0.2);
-      bar.name = name;
-      group.add(bar);
+      bar.name = barName;
+      car.add(bar);
     }
   }
-  group.userData.wheels = wheels;
-  return group;
+  car.userData.wheels = wheels;
+  return car;
 }
 
 export function makeCar(kind, color, x, z, angle, rng) {
@@ -88,18 +88,19 @@ export function stepTrafficCar(vehicle, dt, rng) {
   vehicle.x += fx * vehicle.speed * dt;
   vehicle.z += fz * vehicle.speed * dt;
   const across = Math.abs(fx) > 0.5 ? vehicle.x : vehicle.z;
-  const nearRoad = CITY.roads.find((r) => Math.abs(across - r) < 1.2);
-  if (nearRoad !== undefined && rng.next() < dt * 0.25) {
+  const crossing = CITY.roads.find((r) => Math.abs(across - r) < 1.2);
+  if (crossing !== undefined && rng.next() < dt * 0.25) {
     vehicle.angle += rng.next() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
   }
-  // Wrap around the city edge instead of driving into the ocean: each
-  // row is [axis, edge, angle to turn to when past it].
-  for (const [axis, edge, turn] of [
+  // Wrap around the city edge instead of driving into the ocean. Each
+  // entry is [axis, edge, the heading to take when past it].
+  const EDGES = [
     ['x', CITY.half, Math.PI],
     ['x', -CITY.half, 0],
     ['z', CITY.half, -Math.PI / 2],
     ['z', -CITY.half, Math.PI / 2],
-  ]) {
+  ];
+  for (const [axis, edge, turn] of EDGES) {
     const past = edge > 0 ? vehicle[axis] > edge : vehicle[axis] < edge;
     if (past) {
       vehicle[axis] = edge;
@@ -110,28 +111,27 @@ export function stepTrafficCar(vehicle, dt, rng) {
 
 // Arcade driving physics for the player's vehicle. Returns true on a hard hit.
 // `tune` is the garage engine level (0–3): +12% top speed per level.
-// Gas, brake and coasting: speed chases the top speed the car's
-// condition and garage tune allow. A wrecked vehicle loses top speed too.
-function applyPedals(vehicle, gas, brake, dt, topSpeed) {
+export function stepPlayerCar(vehicle, input, dt, collide, tune) {
+  const gas = input.held.up ? 1 : 0;
+  const brake = input.held.down ? 1 : 0;
+  const steerInput = (input.held.left ? 1 : 0) - (input.held.right ? 1 : 0);
+  const condition = (vehicle.condition ?? 100) / 100;
+  const topSpeed = CAR.maxSpeed * (1 + 0.12 * (tune || 0)) * (0.55 + 0.45 * condition);
+  // Gas, brake and coasting: speed chases the top speed the car's
+  // condition and garage tune allow. A wrecked vehicle loses top speed too.
   if (gas) vehicle.speed += CAR.accel * dt;
   if (brake) vehicle.speed -= (vehicle.speed > 0.5 ? CAR.brake : CAR.reverseAccel) * dt;
   if (!gas && !brake) vehicle.speed -= Math.sign(vehicle.speed) * CAR.grip * dt * 0.6;
   if (Math.abs(vehicle.speed) < 0.2 && !gas && !brake) vehicle.speed = 0;
   vehicle.speed = Math.max(-CAR.maxReverse, Math.min(topSpeed, vehicle.speed));
-}
-
-// Steering bites harder the faster the car goes, and reverses with it.
-function applySteering(vehicle, steerInput, dt) {
+  // Steering bites harder the faster the car goes, and reverses with it.
   const bite = Math.min(1, Math.abs(vehicle.speed) / 6) * Math.sign(vehicle.speed || 1);
   vehicle.angle += steerInput * CAR.steer * dt * bite;
-}
-
-// Move along the heading; a wall stops the car dead instead of letting it
-// phase through. Returns true on a hard hit.
-function moveVehicle(vehicle, dt, collide, radius) {
+  // Move along the heading; a wall stops the car dead instead of letting
+  // it phase through.
   const nx = vehicle.x + Math.sin(vehicle.angle) * vehicle.speed * dt;
   const nz = vehicle.z + Math.cos(vehicle.angle) * vehicle.speed * dt;
-  const hit = collide(nx, nz, radius);
+  const hit = collide(nx, nz, CAR.radius);
   if (hit) vehicle.speed *= 0.3;
   else {
     vehicle.x = nx;
@@ -140,37 +140,33 @@ function moveVehicle(vehicle, dt, collide, radius) {
   return hit && Math.abs(vehicle.speed) > 4;
 }
 
-// Arcade driving physics for the player's vehicle. Returns true on a hard hit.
-// `tune` is the garage engine level (0-3): +12% top speed per level.
-export function stepPlayerCar(vehicle, input, dt, collide, tune) {
-  const gas = input.held.up ? 1 : 0;
-  const brake = input.held.down ? 1 : 0;
-  const steerInput = (input.held.left ? 1 : 0) - (input.held.right ? 1 : 0);
-  const condition = (vehicle.condition ?? 100) / 100;
-  const topSpeed = CAR.maxSpeed * (1 + 0.12 * (tune || 0)) * (0.55 + 0.45 * condition);
-  applyPedals(vehicle, gas, brake, dt, topSpeed);
-  applySteering(vehicle, steerInput, dt);
-  return moveVehicle(vehicle, dt, collide, CAR.radius);
+// Angles wrap at ±π; this keeps any heading difference in range.
+function wrapAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
 }
 
-// A police vehicle steers toward the player and rams — but it respects the
-// city: it will not drive through a building, and it eases off once it has
-// caught up, instead of pinning the player forever. Returns true on contact.
+// A police vehicle steers toward the player and rams — but it respects
+// the city: it will not drive through a building, and it eases off once
+// it has caught up, instead of pinning the player forever. Returns true
+// on contact.
 export function stepPoliceCar(vehicle, targetX, targetZ, dt, collide) {
   const dx = targetX - vehicle.x;
   const dz = targetZ - vehicle.z;
   const dist = Math.hypot(dx, dz) || 1;
   const wanted = Math.atan2(dx, dz);
-  let diff = wanted - vehicle.angle;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
+  const diff = wrapAngle(wanted - vehicle.angle);
   vehicle.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
   // How fast the cruiser closes in, by distance: crawl once it has
-  // caught up, cruise at mid range, flat out from far away. Each row is
-  // [comparison, limit, speed]; past the last row it runs flat out.
-  const CRUISE = [['<', 6, 4], ['<=', 30, 20]];
-  const match = CRUISE.find(([op, limit]) => (op === '<' ? dist < limit : dist <= limit));
-  const cruise = match ? match[2] : 26;
+  // caught up, cruise at mid range, flat out from far away. Each entry is
+  // [test, limit, speed]; past the last entry it runs flat out.
+  const SPEEDS = [
+    [(d) => d < 6, 4],
+    [(d) => d <= 30, 20],
+  ];
+  const match = SPEEDS.find(([test]) => test(dist));
+  const cruise = match ? match[1] : 26;
   vehicle.speed += (cruise - vehicle.speed) * dt * 1.2;
   const nx = vehicle.x + Math.sin(vehicle.angle) * vehicle.speed * dt;
   const nz = vehicle.z + Math.cos(vehicle.angle) * vehicle.speed * dt;

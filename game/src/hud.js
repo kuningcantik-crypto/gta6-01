@@ -1,24 +1,25 @@
 // The HUD: cash, health, respect, wanted stars, mission header, dispatch
-// panel, weapon slots, crew, district, car identity, radio, clock, dialogue
-// and a live minimap. All DOM — the 3D canvas stays clean. Every number is
-// read from the live simulation state; nothing is faked. Text is only
-// rewritten when it changes, and the minimap repaints at 10 Hz.
-import { CITY, CREW, MISSIONS, RADIO, WANTED, districtAt, rankFor } from './config.js';
+// panel, weapon slots, crew, district, car identity, radio, clock,
+// dialogue and a live minimap. All DOM — the 3D canvas stays clean.
+// Every number is read from the live simulation state; nothing is faked.
+// Text is only rewritten when it changes, and the minimap repaints at
+// 10 Hz.
+import { CITY, CREW, MISSIONS, RADIO, WANTED, districtAt, heatLabel, rankFor } from './config.js';
 import { currentMission, nextStepLabel, objectiveLabel, stepTarget } from './missions.js';
 import { loadBest, unitName } from './world.js';
 
-function fmtClock(minutes) {
+function clockText(minutes) {
   const total = Math.floor(minutes);
   const hh = Math.floor(total / 60) % 24;
   const mm = total % 60;
   const day = ['FRI', 'SAT', 'SUN'][Math.floor(total / (60 * 24)) % 3];
   return `${day} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
-function fmtTimer(seconds) {
+function timerText(seconds) {
   const s = Math.max(0, Math.ceil(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
-function gearFor(speed) {
+function gearLabel(speed) {
   const v = Math.abs(speed);
   if (v < 0.5) return 'N';
   return `G${Math.min(5, 1 + Math.floor(v / 6))}`;
@@ -94,7 +95,7 @@ export function createHud(state, callbacks) {
     if (el.garageMsg) el.garageMsg.textContent = text || '';
   }
 
-  function drawMinimap() {
+  function paintMinimap() {
     const size = 180;
     const scale = size / (CITY.half * 2 + 40);
     const toMap = (x, z) => [size / 2 + x * scale, size / 2 + z * scale];
@@ -202,7 +203,7 @@ export function createHud(state, callbacks) {
   }
 
   // Cash, health, respect rank, wanted stars and the clock.
-  function updateVitals(rico) {
+  function refreshVitals(rico) {
     setText('cash', el.cash, `$${rico.cash.toLocaleString('en-US')}`);
     el.healthFill.style.width = `${Math.max(0, rico.health)}%`;
     setText('hp', el.healthText, `HP ${Math.ceil(Math.max(0, rico.health))}`);
@@ -216,11 +217,11 @@ export function createHud(state, callbacks) {
       : `${rico.rp.toLocaleString('en-US')} RP — max rank`);
     setText('stars', el.stars, '★'.repeat(rico.wanted) + '☆'.repeat(WANTED.maxStars - rico.wanted));
     el.stars.style.color = rico.wanted > 0 ? '#ffcf3d' : 'rgba(255,255,255,0.35)';
-    setText('clock', el.clock, fmtClock(state.clockMinutes));
+    setText('clock', el.clock, clockText(state.clockMinutes));
   }
 
   // Weapon slots: owned weapons show ammo, locked ones show the RP gate.
-  function updateWeapons(rico) {
+  function refreshWeapons(rico) {
     const html = rico.weapons.map((w, i) => {
       const cls = `slot${i === rico.weaponIndex ? ' current' : ''}${w.owned ? '' : ' locked'}`;
       const ammo = !w.owned ? `LOCKED · ${w.unlockRp} RP` : (w.id === 'fists' ? '∞' : `${w.mag} / ${w.ammo}`);
@@ -230,7 +231,7 @@ export function createHud(state, callbacks) {
   }
 
   // Mission header: chapter, title, stage bar, objective, next step, timer.
-  function updateMissionHeader() {
+  function refreshMissionHeader() {
     const mission = currentMission(state);
     if (!mission) {
       setText('mch', el.missionChapter, 'FREE ROAM');
@@ -248,7 +249,7 @@ export function createHud(state, callbacks) {
     setText('mo', el.missionObjective, objectiveLabel(state));
     setText('mn', el.missionNext, nextStepLabel(state));
     const timed = step && (step.kind === 'race' || step.kind === 'timed') && step.seconds;
-    setText('mtimer', el.missionTimer, timed ? `⏱ ${fmtTimer(state.missionTimer)}` : '');
+    setText('mtimer', el.missionTimer, timed ? `⏱ ${timerText(state.missionTimer)}` : '');
   }
 
   // How close a unit is decides its tactic: ramming up close, pursuit
@@ -259,7 +260,7 @@ export function createHud(state, callbacks) {
   }
 
   // Dispatch panel: real police units with distance + tactic.
-  function updateDispatch(rico) {
+  function refreshDispatch(rico) {
     const police = state.cars.filter((c) => c.kind === 'police' && !c.disabled);
     const totalUnits = police.length + (state.heli.active ? 1 : 0);
     const rows = [];
@@ -281,7 +282,7 @@ export function createHud(state, callbacks) {
   }
 
   // Crew abilities with live cooldowns, and the district + heat readout.
-  function updateCrewAndDistrict(rico) {
+  function refreshCrewAndDistrict(rico) {
     const crewHtml = CREW.map((c) => {
       const cd = rico.crew[c.id] || 0;
       return `<div class="ability"><span><b>${c.key}</b> ${c.name} — ${c.who}</span><span class="cd">${cd > 0 ? Math.ceil(cd) + 's' : 'READY'}</span></div>`;
@@ -291,15 +292,15 @@ export function createHud(state, callbacks) {
     const heat = state.districtHeat[d.name] || 0;
     setText('dn', el.districtName, d.name);
     setText('dr', el.districtRoad, d.road);
-    setText('dh', el.districtHeat, `${heat < 30 ? 'NEUTRAL' : heat < 60 ? 'WARM' : 'HOT'} · HEAT ${heat}`);
+    setText('dh', el.districtHeat, `${heatLabel(heat)} · HEAT ${heat}`);
   }
 
   // Car identity + speed, the crosshair, and the radio line.
-  function updateCarAndRadio(rico, screen) {
+  function refreshCarAndRadio(rico, screen) {
     if (rico.car) {
       setText('speed', el.speed, `${Math.round(Math.abs(rico.car.speed) * 3.6)} km/h`);
       setText('cname', el.carName, rico.car.name || 'STOLEN CAR');
-      setText('ccond', el.carCond, `CONDITION ${Math.round(rico.car.condition ?? 100)}% · ${gearFor(rico.car.speed)} · TUNE ${rico.garage.tune}`);
+      setText('ccond', el.carCond, `CONDITION ${Math.round(rico.car.condition ?? 100)}% · ${gearLabel(rico.car.speed)} · TUNE ${rico.garage.tune}`);
       el.crosshair.style.display = 'none';
     } else {
       setText('speed', el.speed, '');
@@ -314,7 +315,7 @@ export function createHud(state, callbacks) {
   }
 
   // Dialogue box, the transient message line, and the mission-complete flash.
-  function updateDialogueAndFlash(dt) {
+  function refreshDialogueAndFlash(dt) {
     if (state.dialogue && state.dialogue.timer > 0) {
       el.dialogue.style.display = 'flex';
       setText('dport', el.dialoguePortrait, (state.dialogue.name || 'L')[0]);
@@ -341,8 +342,8 @@ export function createHud(state, callbacks) {
     }
   }
 
-  // Minimap (10 Hz), the visible screen, and the overlay contents.
-  function updateTicker(dt) {
+  // The news ticker along the bottom, turning over every six seconds.
+  function refreshTicker(dt) {
     if (!el.ticker) return;
     tickerTimer -= dt;
     if (tickerTimer > 0) return;
@@ -352,7 +353,7 @@ export function createHud(state, callbacks) {
   }
 
   // Lifetime numbers on the pause screen, from state.stats.
-  function updatePauseStats() {
+  function refreshPauseStats() {
     if (!el.pauseStats || !state.stats) return;
     const s = state.stats;
     const minutes = Math.floor(s.timePlayed / 60);
@@ -364,7 +365,7 @@ export function createHud(state, callbacks) {
       '<div>Shots fired: ' + s.shotsFired + ' · Cruisers wrecked: ' + s.copsWrecked + ' · Pedestrians down: ' + s.pedsDown + '</div>');
   }
 
-  function updateScreens(dt, screen) {
+  function refreshScreens(dt, screen) {
     const rico = state.player;
     // Minimap at 10 Hz — full-rate 2D painting is wasted work. Always draw
     // once, so screenshot staging (dt = 0) still paints it.
@@ -372,7 +373,7 @@ export function createHud(state, callbacks) {
     if (mapTimer > 0.1 || !cache.mapDrawn) {
       mapTimer = 0;
       cache.mapDrawn = true;
-      drawMinimap();
+      paintMinimap();
     }
     // Screens: garage / missions overlays sit above play.
     const shown = state.garageOpen ? 'garage' : (state.missionsOpen ? 'missions' : screen);
@@ -414,7 +415,7 @@ export function createHud(state, callbacks) {
         ? `Best run: $${best.cash.toLocaleString('en-US')} · ${best.missions} / ${MISSIONS.length} jobs`
         : '');
     }
-    if (screen === 'pause') updatePauseStats();
+    if (screen === 'pause') refreshPauseStats();
     if (screen === 'complete') {
       setText('fcash', el.finalCash, `$${rico.cash.toLocaleString('en-US')}`);
       setText('fmiss', el.finalMissions, `${state.missionIndex} / ${MISSIONS.length} jobs done`);
@@ -427,15 +428,15 @@ export function createHud(state, callbacks) {
     el.hud.style.display = screen === 'play' ? 'block' : 'none';
     // The keyboard hint is a play aid, not a screenshot prop.
     if (el.controls) el.controls.style.display = window.__isShot ? 'none' : '';
-    updateVitals(rico);
-    updateWeapons(rico);
-    updateMissionHeader();
-    updateDispatch(rico);
-    updateCrewAndDistrict(rico);
-    updateCarAndRadio(rico, screen);
-    updateDialogueAndFlash(dt);
-    updateTicker(dt);
-    updateScreens(dt, screen);
+    refreshVitals(rico);
+    refreshWeapons(rico);
+    refreshMissionHeader();
+    refreshDispatch(rico);
+    refreshCrewAndDistrict(rico);
+    refreshCarAndRadio(rico, screen);
+    refreshDialogueAndFlash(dt);
+    refreshTicker(dt);
+    refreshScreens(dt, screen);
   }
 
   // Wire the menu buttons.

@@ -1,8 +1,8 @@
-// The city: roads, blocks, instanced buildings, palms, lamps, ocean, beach,
-// pier, clouds and signs. Buildings are THREE.InstancedMesh (one draw call
-// per facade colour), so the whole city costs a handful of calls instead of
-// hundreds. Everything is placed from the seeded RNG, so ?seed=N rebuilds
-// the same city every time.
+// The city: roads, blocks, instanced buildings, palms, lamps, ocean,
+// beach, pier, clouds and signs. Buildings are THREE.InstancedMesh (one
+// draw call per facade colour), so the whole city costs a handful of
+// calls instead of hundreds. Everything is placed from the seeded RNG, so
+// ?seed=N rebuilds the same city every time.
 import * as THREE from 'three';
 import { CITY, DISTRICTS, PALETTE } from './config.js';
 
@@ -12,7 +12,7 @@ const LINE_COLOR = 0xf5d76e;
 const SAND_COLOR = 0xe8cf9a;
 const WATER_COLOR = 0x2a7fa8;
 
-function box(w, h, d, color, opts = {}) {
+function solidBox(w, h, d, color, opts = {}) {
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
     new THREE.MeshLambertMaterial({color, ...opts}),
@@ -22,7 +22,7 @@ function box(w, h, d, color, opts = {}) {
   return mesh;
 }
 
-function flat(w, d, color, opts = {}) {
+function groundPlane(w, d, color, opts = {}) {
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(w, d),
     new THREE.MeshLambertMaterial({color, ...opts}),
@@ -34,7 +34,7 @@ function flat(w, d, color, opts = {}) {
 
 // One InstancedMesh per facade colour: a whole district's towers in a
 // single draw call. Windows are a canvas texture, shared by every tower.
-function towerTexture(rng) {
+function windowTexture(rng) {
   const c = document.createElement('canvas');
   c.width = 128;
   c.height = 256;
@@ -52,8 +52,8 @@ function towerTexture(rng) {
   return tex;
 }
 
-// Build one InstancedMesh from a list of matrices and add it to the scene.
-function instanced(scene, geo, mat, matrices, shadow = false) {
+// Add one InstancedMesh from a list of matrices to the scene.
+function placeInstanced(scene, geo, mat, matrices, shadow = false) {
   const mesh = new THREE.InstancedMesh(geo, mat, matrices.length);
   matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
   mesh.castShadow = shadow;
@@ -64,21 +64,21 @@ function instanced(scene, geo, mat, matrices, shadow = false) {
 }
 
 // A flat matrix: position on the ground, lying face-up, scaled to (w, d).
-function groundMatrix(x, z, w, d) {
+function flatMatrix(x, z, w, d) {
   const m = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
   m.premultiply(new THREE.Matrix4().makeTranslation(x, 0.02, z));
   m.multiply(new THREE.Matrix4().makeScale(w, d, 1));
   return m;
 }
 
-function layRoads(scene) {
-  const ground = flat(CITY.half * 2 + 60, CITY.half * 2 + 60, GROUND_COLOR);
+function paveRoads(scene) {
+  const ground = groundPlane(CITY.half * 2 + 60, CITY.half * 2 + 60, GROUND_COLOR);
   scene.add(ground);
   for (const c of CITY.roads) {
-    const v = flat(CITY.roadWidth, CITY.half * 2, ROAD_COLOR);
+    const v = groundPlane(CITY.roadWidth, CITY.half * 2, ROAD_COLOR);
     v.position.set(c, 0.01, 0);
     scene.add(v);
-    const h = flat(CITY.half * 2, CITY.roadWidth, ROAD_COLOR);
+    const h = groundPlane(CITY.half * 2, CITY.roadWidth, ROAD_COLOR);
     h.position.set(0, 0.01, c);
     scene.add(h);
   }
@@ -86,22 +86,20 @@ function layRoads(scene) {
   const dashMatrices = [];
   for (const c of CITY.roads) {
     for (let d = -CITY.half + 6; d < CITY.half; d += 12) {
-      dashMatrices.push(groundMatrix(c, d, 0.5, 3));
-      dashMatrices.push(groundMatrix(d, c, 3, 0.5));
+      dashMatrices.push(flatMatrix(c, d, 0.5, 3));
+      dashMatrices.push(flatMatrix(d, c, 3, 0.5));
     }
   }
-  instanced(scene, new THREE.PlaneGeometry(1, 1), new THREE.MeshLambertMaterial({color: LINE_COLOR}), dashMatrices);
+  placeInstanced(scene, new THREE.PlaneGeometry(1, 1), new THREE.MeshLambertMaterial({color: LINE_COLOR}), dashMatrices);
 }
 
-function layBlocks(scene, rng) {
-  const towers = [];
+function raiseBlocks(scene, rng) {
   const colliders = [];
-  const winTex = towerTexture(rng);
+  const winTex = windowTexture(rng);
   const palette = [0x9aa3ad, 0xb0a89a, 0x8a9bb0, 0xa89080, 0x7a8a9a, 0xc0b49a];
   const byColour = new Map();
   const trimMatrices = [];
   const rooftopMatrices = [];
-  const dummy = new THREE.Object3D();
   for (const bx of CITY.blockCentres) {
     for (const bz of CITY.blockCentres) {
       if (bx === 0 && bz === 0) continue; // central plaza stays open
@@ -129,7 +127,6 @@ function layBlocks(scene, rng) {
         );
       }
       colliders.push({x0: bx - bw / 2, x1: bx + bw / 2, z0: bz - bd / 2, z1: bz + bd / 2});
-      towers.push({bx, bz, bw, bd, height});
     }
   }
   // One InstancedMesh per colour.
@@ -143,12 +140,12 @@ function layBlocks(scene, rng) {
     inst.instanceMatrix.needsUpdate = true;
     scene.add(inst);
   }
-  instanced(scene, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x6b5a44}), trimMatrices, true);
-  instanced(scene, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x8a8f98}), rooftopMatrices, true);
-  return {colliders, towers};
+  placeInstanced(scene, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x6b5a44}), trimMatrices, true);
+  placeInstanced(scene, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x8a8f98}), rooftopMatrices, true);
+  return {colliders};
 }
 
-function textTexture(text, bg = '#1b2b4a', fg = '#ffd76e') {
+function labelTexture(text, bg = '#1b2b4a', fg = '#ffd76e') {
   const c = document.createElement('canvas');
   c.width = 256;
   c.height = 64;
@@ -165,7 +162,7 @@ function textTexture(text, bg = '#1b2b4a', fg = '#ffd76e') {
   return tex;
 }
 
-function addSigns(scene) {
+function plantSigns(scene) {
   // District name boards on posts at the plaza corners.
   const spots = [
     {x: -8, z: -8, text: 'CENTRAL PLAZA', ry: Math.PI / 4},
@@ -174,12 +171,12 @@ function addSigns(scene) {
     {x: -120, z: -120, text: 'SAFEHOUSE', ry: Math.PI / 4},
   ];
   for (const s of spots) {
-    const post = box(0.3, 3, 0.3, 0x444444);
+    const post = solidBox(0.3, 3, 0.3, 0x444444);
     post.position.set(s.x, 1.5, s.z);
     scene.add(post);
     const board = new THREE.Mesh(
       new THREE.PlaneGeometry(10, 2.5),
-      new THREE.MeshBasicMaterial({map: textTexture(s.text), side: THREE.DoubleSide}),
+      new THREE.MeshBasicMaterial({map: labelTexture(s.text), side: THREE.DoubleSide}),
     );
     board.position.set(s.x, 3.4, s.z);
     board.rotation.y = s.ry;
@@ -187,7 +184,7 @@ function addSigns(scene) {
   }
 }
 
-function addPalms(scene, rng) {
+function plantPalms(scene, rng) {
   const trunkMat = new THREE.MeshLambertMaterial({color: 0x7a5a3a});
   const leafMat = new THREE.MeshLambertMaterial({color: 0x3f8a4a, side: THREE.DoubleSide});
   const spots = [];
@@ -220,11 +217,11 @@ function addPalms(scene, rng) {
       ));
     }
   }
-  instanced(scene, new THREE.CylinderGeometry(0.25, 0.4, 5, 6), trunkMat, trunkMatrices, true);
-  instanced(scene, new THREE.PlaneGeometry(3.4, 0.9), leafMat, leafMatrices);
+  placeInstanced(scene, new THREE.CylinderGeometry(0.25, 0.4, 5, 6), trunkMat, trunkMatrices, true);
+  placeInstanced(scene, new THREE.PlaneGeometry(3.4, 0.9), leafMat, leafMatrices);
 }
 
-function addLamps(scene) {
+function plantLamps(scene) {
   const poleMat = new THREE.MeshLambertMaterial({color: 0x2a2f3a});
   const bulbMat = new THREE.MeshBasicMaterial({color: 0xffe9b0});
   const poleMatrices = [];
@@ -235,13 +232,13 @@ function addLamps(scene) {
       bulbMatrices.push(new THREE.Matrix4().makeTranslation(c + 7, 6.2, d));
     }
   }
-  instanced(scene, new THREE.CylinderGeometry(0.12, 0.12, 6, 6), poleMat, poleMatrices);
-  instanced(scene, new THREE.SphereGeometry(0.35, 8, 6), bulbMat, bulbMatrices);
+  placeInstanced(scene, new THREE.CylinderGeometry(0.12, 0.12, 6, 6), poleMat, poleMatrices);
+  placeInstanced(scene, new THREE.SphereGeometry(0.35, 8, 6), bulbMat, bulbMatrices);
 }
 
-function addWaterfront(scene, rng) {
+function buildWaterfront(scene, rng) {
   // Beach strip and the ocean beyond it.
-  const sand = flat(CITY.half * 2 + 60, 30, SAND_COLOR);
+  const sand = groundPlane(CITY.half * 2 + 60, 30, SAND_COLOR);
   sand.position.set(0, 0.02, CITY.beachZ + 8);
   scene.add(sand);
   const ocean = new THREE.Mesh(
@@ -252,8 +249,26 @@ function addWaterfront(scene, rng) {
   ocean.position.set(0, -0.4, CITY.oceanZ + 40);
   ocean.name = 'ocean';
   scene.add(ocean);
+  // Beach umbrellas: striped cones on poles along the sand, purely
+  // decorative — they never move and never collide with anything.
+  const umbrellaColors = [0xff5fa2, 0xffd76e, 0x7dd8ff, 0xff7a2b];
+  for (let i = 0; i < 4; i += 1) {
+    const ux = -120 + i * 80;
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.08, 2.2, 6),
+      new THREE.MeshLambertMaterial({color: 0x8a6b4a}),
+    );
+    pole.position.set(ux, 1.1, 188);
+    scene.add(pole);
+    const canopy = new THREE.Mesh(
+      new THREE.ConeGeometry(2.2, 1, 8),
+      new THREE.MeshLambertMaterial({color: umbrellaColors[i % umbrellaColors.length]}),
+    );
+    canopy.position.set(ux, 2.6, 188);
+    scene.add(canopy);
+  }
   // Pier: wooden deck on posts, out into the water at x = 0.
-  const deck = box(8, 0.6, 34, 0x8a6b4a);
+  const deck = solidBox(8, 0.6, 34, 0x8a6b4a);
   deck.position.set(0, 0.8, 196);
   scene.add(deck);
   for (let z = 182; z <= 210; z += 7) {
@@ -274,10 +289,10 @@ function addWaterfront(scene, rng) {
     const boat = new THREE.Group();
     boat.name = 'boat-' + i;
     boat.userData = {lane, speed, phase};
-    const hull = box(3, 1.2, 8, color);
+    const hull = solidBox(3, 1.2, 8, color);
     hull.position.set(0, 0.2, 0);
     boat.add(hull);
-    const cabin = box(2, 1, 3, 0xffffff);
+    const cabin = solidBox(2, 1, 3, 0xffffff);
     cabin.position.set(0, 1.2, 0);
     boat.add(cabin);
     boat.position.set(phase - 130, 0, lane);
@@ -288,7 +303,7 @@ function addWaterfront(scene, rng) {
 // The pier Ferris wheel: two legs, a rim with spokes, and eight cabins
 // that hang from the rim. The rim group spins in render.js; the cabins
 // counter-rotate there so they stay upright.
-function addFerrisWheel(scene) {
+function buildFerrisWheel(scene) {
   const wheel = new THREE.Group();
   wheel.name = 'ferris-wheel';
   wheel.position.set(0, 0, 210);
@@ -331,10 +346,9 @@ function addFerrisWheel(scene) {
   scene.add(wheel);
 }
 
-
 // The pier lighthouse: a striped tower with a lamp room, and a beam on a
 // pivot the renderer sweeps across the bay.
-function addLighthouse(scene) {
+function buildLighthouse(scene) {
   const tower = new THREE.Group();
   tower.name = 'lighthouse';
   tower.position.set(6, 0, 208);
@@ -375,7 +389,7 @@ function addLighthouse(scene) {
   scene.add(tower);
 }
 
-function addPlaza(scene) {
+function buildPlaza(scene) {
   // Central plaza: a paved disc with a fountain, kept open for the action.
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(16, 24),
@@ -400,7 +414,7 @@ function addPlaza(scene) {
   scene.add(water);
 }
 
-function addClouds(scene, rng) {
+function driftClouds(scene, rng) {
   const clouds = [];
   const mat = new THREE.MeshLambertMaterial({color: 0xffd9c0, transparent: true, opacity: 0.85});
   for (let i = 0; i < 8; i += 1) {
@@ -419,15 +433,15 @@ function addClouds(scene, rng) {
 }
 
 export function buildCity(scene, rng) {
-  layRoads(scene);
-  const {colliders} = layBlocks(scene, rng);
-  addSigns(scene);
-  addPalms(scene, rng);
-  addLamps(scene);
-  addWaterfront(scene, rng);
-  addFerrisWheel(scene);
-  addLighthouse(scene);
-  addPlaza(scene);
-  const clouds = addClouds(scene, rng);
+  paveRoads(scene);
+  const {colliders} = raiseBlocks(scene, rng);
+  plantSigns(scene);
+  plantPalms(scene, rng);
+  plantLamps(scene);
+  buildWaterfront(scene, rng);
+  buildFerrisWheel(scene);
+  buildLighthouse(scene);
+  buildPlaza(scene);
+  const clouds = driftClouds(scene, rng);
   return {colliders, clouds};
 }

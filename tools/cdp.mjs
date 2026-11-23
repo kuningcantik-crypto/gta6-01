@@ -27,17 +27,15 @@ async function measureFps(send, seconds) {
   return evalJs(send, expr, true);
 }
 
-const cmd = process.argv[2];
-
-if (cmd === 'fps') {
+async function runFps() {
   const url = process.argv[3] || 'http://127.0.0.1:8080/';
   const seconds = Number(process.argv[4] || 6);
   const keys = (process.argv[5] || '').split(',').filter(Boolean);
   const fw = Number(process.env.FPS_W || 1280);
   const fh = Number(process.env.FPS_H || 800);
-  const { child, port } = await launchChrome(fw, fh, false);
+  const {child, port} = await launchChrome(fw, fh, false);
   try {
-    const { send, events } = await connect(port);
+    const {send, events} = await connect(port);
     await newTab(send, url, fw, fh, false);
     await sleep(2500);
     if (!process.env.FPS_TITLE) {
@@ -51,30 +49,38 @@ if (cmd === 'fps') {
     for (const k of keys) await keyDown(send, `Key${k}`, k.toLowerCase());
     const result = await measureFps(send, seconds);
     for (const k of keys) await keyUp(send, `Key${k}`, k.toLowerCase());
-    console.log(JSON.stringify({ url, seconds, keys, ...result, consoleErrors: consoleErrors(events) }, null, 2));
+    console.log(JSON.stringify({url, seconds, keys, ...result, consoleErrors: consoleErrors(events)}, null, 2));
   } finally { child.kill(); }
-} else if (cmd === 'shot') {
+}
+
+async function runShot() {
   const url = process.argv[3];
   const out = process.argv[4];
+  if (!url || !out) {
+    console.log('usage: cdp.mjs shot <url> <out.jpg> [w] [h] [mobile]');
+    process.exit(1);
+  }
   const width = Number(process.argv[5] || 1280);
   const height = Number(process.argv[6] || 800);
   const mobile = process.argv[7] === 'mobile';
-  const { child, port } = await launchChrome(width, height, mobile);
+  const {child, port} = await launchChrome(width, height, mobile);
   try {
-    const { send, events } = await connect(port);
+    const {send, events} = await connect(port);
     await newTab(send, url, width, height, mobile);
     const ready = await waitFor(send, 'window.__shotReady === true');
     if (!ready) console.log('WARN: __shotReady never set; screenshotting anyway');
     await sleep(400);
     await screenshot(send, out);
-    console.log(JSON.stringify({ out, ready, consoleErrors: consoleErrors(events) }, null, 2));
+    console.log(JSON.stringify({out, ready, consoleErrors: consoleErrors(events)}, null, 2));
   } finally { child.kill(); }
-} else if (cmd === 'eval') {
+}
+
+async function runEval() {
   const url = process.argv[3];
   const expr = process.argv[4];
-  const { child, port } = await launchChrome(1280, 800, false);
+  const {child, port} = await launchChrome(1280, 800, false);
   try {
-    const { send, events } = await connect(port);
+    const {send, events} = await connect(port);
     await newTab(send, url, 1280, 800, false);
     // The game module can take a while to boot under SwiftShader; wait for
     // the diagnostics handle instead of assuming a fixed sleep is enough.
@@ -85,7 +91,13 @@ if (cmd === 'fps') {
     const errs = consoleErrors(events);
     if (errs.length) console.log('ERRORS:', JSON.stringify(errs, null, 2));
   } finally { child.kill(); }
-} else {
+}
+
+const COMMANDS = {fps: runFps, shot: runShot, eval: runEval};
+const cmd = process.argv[2];
+const run = COMMANDS[cmd];
+if (!run) {
   console.log('usage: cdp.mjs fps|shot|eval ...');
   process.exit(1);
 }
+await run();

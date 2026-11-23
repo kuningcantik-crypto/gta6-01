@@ -1,8 +1,8 @@
 // Procedural sound: everything is synthesized with WebAudio, no audio
-// files at all. An engine hum, a police siren, gunshots, a punch, a pickup
-// chime, a mission sting, and a soft sunset pad under the title screen.
-// One chord per radio station — switching station retunes the pad.
-const RADIO_CHORDS = [
+// files at all. An engine hum, a police siren, gunshots, a punch, a
+// pickup chime, a mission sting, and a soft sunset pad under the title
+// screen. One chord per radio station — switching station retunes the pad.
+const STATION_CHORDS = [
   [220, 277.18, 329.63],
   [196, 246.94, 293.66],
   [174.61, 220, 261.63],
@@ -10,171 +10,177 @@ const RADIO_CHORDS = [
 ];
 
 export function createAudio() {
-  let ac = null;
-  let engineOsc = null;
-  let engineGain = null;
-  let sirenOsc = null;
-  let sirenGain = null;
-  let padNodes = null;
-  let enabled = false;
+  let ctx = null;
+  let motor = null;
+  let motorLevel = null;
+  let wail = null;
+  let wailLevel = null;
+  let padVoices = null;
+  let live = false;
 
-  function ensure() {
-    if (ac) return true;
+  function openContext() {
+    if (ctx) return true;
     try {
-      ac = new (window.AudioContext || window.webkitAudioContext)();
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
     } catch {
       return false;
     }
     return true;
   }
   function unlock() {
-    if (!ensure()) return;
-    if (ac.state === 'suspended') ac.resume();
-    enabled = true;
-    startEngine();
+    if (!openContext()) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    live = true;
+    startMotor();
     startPad();
   }
-  function startEngine() {
-    if (engineOsc) return;
-    engineOsc = ac.createOscillator();
-    engineOsc.type = 'sawtooth';
-    engineOsc.frequency.value = 50;
-    const filter = ac.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 320;
-    engineGain = ac.createGain();
-    engineGain.gain.value = 0;
-    engineOsc.connect(filter);
-    filter.connect(engineGain);
-    engineGain.connect(ac.destination);
-    engineOsc.start();
+  function startMotor() {
+    if (motor) return;
+    motor = ctx.createOscillator();
+    motor.type = 'sawtooth';
+    motor.frequency.value = 50;
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = 320;
+    motorLevel = ctx.createGain();
+    motorLevel.gain.value = 0;
+    motor.connect(lowpass);
+    lowpass.connect(motorLevel);
+    motorLevel.connect(ctx.destination);
+    motor.start();
   }
   function startPad() {
-    if (padNodes) return;
-    startPadWith(RADIO_CHORDS[0]);
+    if (padVoices) return;
+    retunePad(STATION_CHORDS[0]);
   }
-  function startPadWith(freqs) {
-    padNodes = [];
-    const gain = ac.createGain();
-    gain.gain.value = 0.035;
-    gain.connect(ac.destination);
+  function retunePad(freqs) {
+    padVoices = [];
+    const bus = ctx.createGain();
+    bus.gain.value = 0.035;
+    bus.connect(ctx.destination);
     for (const freq of freqs) {
-      const osc = ac.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      osc.connect(gain);
-      osc.start();
-      padNodes.push(osc);
+      const voice = ctx.createOscillator();
+      voice.type = 'sine';
+      voice.frequency.value = freq;
+      voice.connect(bus);
+      voice.start();
+      padVoices.push(voice);
     }
   }
-  function blip(freq, seconds, type, volume) {
-    if (!ac || !enabled) return;
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.type = type || 'sine';
+  function tone(freq, seconds, shape, volume) {
+    if (!ctx || !live) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = shape || 'sine';
     osc.frequency.value = freq;
-    gain.gain.setValueAtTime(volume || 0.15, ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + seconds);
+    gain.gain.setValueAtTime(volume || 0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + seconds);
     osc.connect(gain);
-    gain.connect(ac.destination);
+    gain.connect(ctx.destination);
     osc.start();
-    osc.stop(ac.currentTime + seconds);
+    osc.stop(ctx.currentTime + seconds);
   }
-  function noise(seconds, volume) {
-    if (!ac || !enabled) return;
-    const len = Math.floor(ac.sampleRate * seconds);
-    const buffer = ac.createBuffer(1, len, ac.sampleRate);
+  function burst(seconds, volume) {
+    if (!ctx || !live) return;
+    const len = Math.floor(ctx.sampleRate * seconds);
+    const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < len; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const src = ac.createBufferSource();
+    const src = ctx.createBufferSource();
     src.buffer = buffer;
-    const gain = ac.createGain();
+    const gain = ctx.createGain();
     gain.gain.value = volume;
     src.connect(gain);
-    gain.connect(ac.destination);
+    gain.connect(ctx.destination);
     src.start();
   }
-  // One-shot effects, as data: each recipe is a list of steps, and each
-  // step names its player (blip or noise), the delay in milliseconds before
-  // it fires, and the arguments. One player function runs them all.
-  const SFX = {
-    shot: [{fn: 'noise', at: 0, args: [0.12, 0.3]}],
+  // One-shot effects, as small scripts: each entry is a list of notes,
+  // and a note names its instrument (tone or burst), the delay before it
+  // fires, and the arguments. A single runner plays every script.
+  const SCRIPTS = {
+    shot: [{play: 'burst', after: 0, with: [0.12, 0.3]}],
     punch: [
-      {fn: 'noise', at: 0, args: [0.08, 0.2]},
-      {fn: 'blip', at: 0, args: [120, 0.08, 'square', 0.1]},
+      {play: 'burst', after: 0, with: [0.08, 0.2]},
+      {play: 'tone', after: 0, with: [120, 0.08, 'square', 0.1]},
     ],
     pickup: [
-      {fn: 'blip', at: 0, args: [880, 0.12, 'sine', 0.18]},
-      {fn: 'blip', at: 90, args: [1320, 0.18, 'sine', 0.15]},
+      {play: 'tone', after: 0, with: [880, 0.12, 'sine', 0.18]},
+      {play: 'tone', after: 90, with: [1320, 0.18, 'sine', 0.15]},
     ],
     mission: [
-      {fn: 'blip', at: 0, args: [523, 0.25, 'triangle', 0.16]},
-      {fn: 'blip', at: 110, args: [659, 0.25, 'triangle', 0.16]},
-      {fn: 'blip', at: 220, args: [784, 0.25, 'triangle', 0.16]},
+      {play: 'tone', after: 0, with: [523, 0.25, 'triangle', 0.16]},
+      {play: 'tone', after: 110, with: [659, 0.25, 'triangle', 0.16]},
+      {play: 'tone', after: 220, with: [784, 0.25, 'triangle', 0.16]},
     ],
-    crash: [{fn: 'noise', at: 0, args: [0.25, 0.25]}],
-    click: [{fn: 'blip', at: 0, args: [600, 0.05, 'square', 0.08]}],
+    crash: [{play: 'burst', after: 0, with: [0.25, 0.25]}],
+    click: [{play: 'tone', after: 0, with: [600, 0.05, 'square', 0.08]}],
+    horn: [
+      {play: 'tone', after: 0, with: [370, 0.18, 'sawtooth', 0.1]},
+      {play: 'tone', after: 0, with: [466, 0.18, 'sawtooth', 0.1]},
+    ],
   };
-  function playStep(step) {
-    if (step.fn === 'noise') noise(...step.args);
-    else blip(...step.args);
+  function playNote(note) {
+    if (note.play === 'burst') burst(...note.with);
+    else tone(...note.with);
   }
-  function playSfx(recipe) {
-    for (const step of recipe) {
-      if (step.at > 0) setTimeout(() => playStep(step), step.at);
-      else playStep(step);
+  function playScript(script) {
+    for (const note of script) {
+      if (note.after > 0) setTimeout(() => playNote(note), note.after);
+      else playNote(note);
     }
   }
-  const sfx = {};
-  for (const [name, recipe] of Object.entries(SFX)) sfx[name] = () => playSfx(recipe);
+  const effects = {};
+  for (const [name, script] of Object.entries(SCRIPTS)) {
+    effects[name] = () => playScript(script);
+  }
   return {
     unlock,
     setRadio(station) {
-      if (!ac || !enabled || !padNodes) return;
-      for (const osc of padNodes) {
+      if (!ctx || !live || !padVoices) return;
+      for (const voice of padVoices) {
         try {
-          osc.stop();
+          voice.stop();
         } catch {
           // already stopped
         }
       }
-      padNodes = null;
-      startPadWith(RADIO_CHORDS[station % RADIO_CHORDS.length]);
+      padVoices = null;
+      retunePad(STATION_CHORDS[station % STATION_CHORDS.length]);
     },
     engine(speed01, driving) {
-      if (!ac || !engineGain) return;
-      const target = enabled && driving ? 0.05 + speed01 * 0.06 : 0;
-      engineGain.gain.setTargetAtTime(target, ac.currentTime, 0.1);
-      engineOsc.frequency.setTargetAtTime(50 + speed01 * 110, ac.currentTime, 0.1);
+      if (!ctx || !motorLevel) return;
+      const target = live && driving ? 0.05 + speed01 * 0.06 : 0;
+      motorLevel.gain.setTargetAtTime(target, ctx.currentTime, 0.1);
+      motor.frequency.setTargetAtTime(50 + speed01 * 110, ctx.currentTime, 0.1);
     },
     siren(on) {
-      if (!ac || !enabled) return;
-      if (on && !sirenOsc) {
-        sirenOsc = ac.createOscillator();
-        sirenOsc.type = 'triangle';
-        sirenGain = ac.createGain();
-        sirenGain.gain.value = 0.045;
-        const lfo = ac.createOscillator();
+      if (!ctx || !live) return;
+      if (on && !wail) {
+        wail = ctx.createOscillator();
+        wail.type = 'triangle';
+        wailLevel = ctx.createGain();
+        wailLevel.gain.value = 0.045;
+        const lfo = ctx.createOscillator();
         lfo.frequency.value = 0.6;
-        const lfoGain = ac.createGain();
+        const lfoGain = ctx.createGain();
         lfoGain.gain.value = 220;
         lfo.connect(lfoGain);
-        lfoGain.connect(sirenOsc.frequency);
-        sirenOsc.frequency.value = 700;
-        sirenOsc.connect(sirenGain);
-        sirenGain.connect(ac.destination);
-        sirenOsc.start();
+        lfoGain.connect(wail.frequency);
+        wail.frequency.value = 700;
+        wail.connect(wailLevel);
+        wailLevel.connect(ctx.destination);
+        wail.start();
         lfo.start();
-      } else if (!on && sirenOsc) {
+      } else if (!on && wail) {
         try {
-          sirenOsc.stop();
+          wail.stop();
         } catch {
           // already stopped
         }
-        sirenOsc = null;
-        sirenGain = null;
+        wail = null;
+        wailLevel = null;
       }
     },
-    ...sfx,
+    ...effects,
   };
 }

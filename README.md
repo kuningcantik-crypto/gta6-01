@@ -14,11 +14,11 @@ A 3D open-world crime game for make.fun's **gta6-01** bounty ($1,666): twelve st
 node serve.ts            # http://localhost:8080
 ```
 
-Or open `game/index.html` through any static server. Progress saves in the browser (localStorage, key `solmar-bay.save.v1`).
+Or serve `game/` with any static server. Progress saves in the browser (localStorage, key `solmar-bay.save.v1`).
 
 Add `?seed=N` to the URL to rebuild the same city and traffic every time — the screenshots and the headless tests both use seed 7.
 
-## The game
+## The story
 
 You are **Rico Vane**, fresh out of the north with $120 and a name to make. Lucia has work for you: twelve jobs stand between you and the big score, from a welcome package run at the pier to a $1,200 gold heist at the bank.
 
@@ -74,6 +74,10 @@ node tools/mission-test.mjs   # all 12 missions
 node tools/playtest.mjs       # desktop play
 node tools/mobile-test.mjs    # 390×844 viewport, real touch events
 ```
+
+Each test launches its own headless Chrome with a fresh profile. If a
+run is killed mid-flight, stray Chromes can starve the VM — clean them
+up before the next batch: `pkill -f 'chrome-profile-'`.
 
 ## Tech
 

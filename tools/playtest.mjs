@@ -5,17 +5,19 @@
 // Usage: node tools/playtest.mjs
 import { launchChrome, connect, newTab, evalJs, consoleErrors, sleep, waitFor, tapKey, keyDown, keyUp } from './cdp-lib.mjs';
 
-const { child, port } = await launchChrome(1280, 800, false);
+const {child, port} = await launchChrome(1280, 800, false);
 const results = [];
 const check = (name, ok, extra = '') => {
-  results.push({ name, ok });
+  results.push({name, ok});
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
 };
 try {
-  const { send, events } = await connect(port);
+  const {send, events} = await connect(port);
   await newTab(send, 'http://127.0.0.1:8080/?seed=7', 1280, 800, false);
   await waitFor(send, '!!window.__solmar', 60000);
   const S = (expr) => `(() => { const s = window.__solmar; return ${expr}; })()`;
+  check('game boots (__solmar present)', (await evalJs(send, S(`!!window.__solmar`))) === true);
+  const pos = () => evalJs(send, S(`({x: s.state.player.x, z: s.state.player.z})`));
 
   await evalJs(send, `document.getElementById('btn-new').click(); 'ok'`);
   await sleep(1500);
@@ -23,12 +25,13 @@ try {
 
   // Walk forward with W: Rico must move. (Long hold: the first seconds
   // after New Game are still warming up SwiftShader's shader compile.)
-  const p0 = await evalJs(send, S(`({x: s.state.player.x, z: s.state.player.z})`));
+  const p0 = await pos();
   await keyDown(send, 'KeyW', 'w');
   await sleep(6000);
   await keyUp(send, 'KeyW', 'w');
-  const p1 = await evalJs(send, S(`({x: s.state.player.x, z: s.state.player.z})`));
-  check('W walks the player', Math.hypot(p1.x - p0.x, p1.z - p0.z) > 3, `${Math.hypot(p1.x - p0.x, p1.z - p0.z).toFixed(1)} m`);
+  const p1 = await pos();
+  const walked = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+  check('W walks the player', walked > 3, `${walked.toFixed(1)} m`);
 
   // Teleport next to a parked car and press E ONCE: must end up IN the car.
   await evalJs(send, S(`s.teleport(-44, -98)`));
@@ -39,7 +42,6 @@ try {
   check('one E press enters the car and stays in', inCar && stillInCar === true);
 
   // Drive with W: speed must rise, car must move.
-  const c0 = await evalJs(send, S(`({x: s.state.player.x, z: s.state.player.z})`));
   await keyDown(send, 'KeyW', 'w');
   await sleep(3000);
   const speed = await evalJs(send, S(`Math.abs(s.state.player.car ? s.state.player.car.speed : 0)`));
@@ -103,7 +105,7 @@ try {
   await evalJs(send, S(`s.state.player.cash = 777, s.setMission(3)`));
   await sleep(2000); // autosave is 15 s; force one via the pause-menu path instead
   await evalJs(send, `window.__solmar.state.player.cash = 777; localStorage.setItem('solmar-bay.save.v1', JSON.stringify({cash: 777, rp: 123, missionIndex: 3, missionStep: 0, x: 0, z: 30, allMissionsDone: false, radioStation: 1, garage: {tune: 1, armor: 0}, weapons: [], weaponIndex: 1, districtHeat: {}})); 'saved'`);
-  await send('Page.navigate', { url: 'http://127.0.0.1:8080/?seed=7' });
+  await send('Page.navigate', {url: 'http://127.0.0.1:8080/?seed=7'});
   await waitFor(send, '!!window.__solmar', 60000);
   await evalJs(send, `document.getElementById('btn-continue').click(); 'ok'`);
   await sleep(1500);

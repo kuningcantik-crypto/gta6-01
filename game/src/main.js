@@ -1,14 +1,16 @@
-// Solmar Bay — boot and the one loop. Input is read every frame, the world
-// advances in fixed 1/60 s steps, and the renderer paints what is there.
-// The game moves between title, play, paused, wasted, busted and complete.
+// Solmar Bay — boot and the one loop. Input is read every frame, the
+// world advances in fixed 1/60 s steps, and the renderer paints what is
+// there. The game moves between title, play, paused, wasted, busted and
+// complete.
 //
 // ?seed=N fixes the city and traffic. ?shot=start|play|chase|end (with
 // &seed=N) stages that scene instead of running the loop, paints it twice
 // and sets window.__shotReady for a screenshot.
 //
-// window.__solmar is a diagnostics handle for headless tests (FPS, mission
-// and touch smoke tests): it exposes the live state and a way to step the
-// simulation without a real keyboard. It changes nothing about the game.
+// window.__solmar is a diagnostics handle for headless tests (FPS,
+// mission and touch smoke tests): it exposes the live state and a way to
+// step the simulation without a real keyboard. It changes nothing about
+// the game.
 import { CITY, STEP, STORY_INTRO } from './config.js';
 import { createInput, createScriptedInput } from './input.js';
 import { createAudio } from './audio.js';
@@ -46,9 +48,11 @@ function announce(message) {
   status.textContent = message;
 }
 
-function startGame(fresh) {
-  if (fresh) resetInPlace(state, seed);
-  else applySave(state, loadGame());
+function beginGame(fresh) {
+  if (fresh) {
+    resetInPlace(state, seed);
+    saveGame(state);
+  } else applySave(state, loadGame());
   completeShown = false;
   screen = 'play';
   cameraYaw = state.player.angle;
@@ -58,7 +62,7 @@ function startGame(fresh) {
   announce(`Playing. ${STORY_INTRO}`);
 }
 
-function respawn() {
+function wakeAtHospital() {
   const p = state.player;
   if (p.car) {
     p.car.kind = 'parked';
@@ -81,11 +85,11 @@ function respawn() {
 }
 
 const hud = createHud(state, {
-  onNewGame: () => startGame(true),
-  onContinue: () => startGame(false),
+  onNewGame: () => beginGame(true),
+  onContinue: () => beginGame(false),
   onResume: () => { screen = 'play'; },
   onRestart: () => {
-    respawn();
+    wakeAtHospital();
     screen = 'play';
   },
   onTitle: () => { screen = 'title'; },
@@ -105,7 +109,7 @@ createTouchControls(input, {
 // Overlay toggles live here, not in stepWorld: the world is frozen while
 // an overlay is open, so stepWorld would never read the key that is
 // supposed to close it. Only while playing, not on the title screen.
-function handleOverlayKeys() {
+function readOverlayKeys() {
   if (input.wasPressed('missions')) state.missionsOpen = !state.missionsOpen;
   if (input.wasPressed('garage')) {
     if (Math.hypot(state.player.x - CITY.safehouse.x, state.player.z - CITY.safehouse.z) < 10) {
@@ -116,9 +120,9 @@ function handleOverlayKeys() {
   }
 }
 
-// The camera follows the player's heading, nudged by mouse movement, and
-// only turns while the player is actually moving.
-function followCamera(frameDt) {
+// The camera follows the player's heading, nudged by mouse movement,
+// and only turns while the player is actually moving.
+function steerCamera(frameDt) {
   cameraYaw -= input.takeMouseDX() * 0.0035;
   let diff = state.player.angle - cameraYaw;
   while (diff > Math.PI) diff -= Math.PI * 2;
@@ -127,9 +131,9 @@ function followCamera(frameDt) {
   if (speed > 2) cameraYaw += diff * Math.min(1, frameDt * 1.8);
 }
 
-// After the world steps: wasted and busted end the run, and finishing the
-// last job opens the complete screen once.
-function updateScreenAfterPlay() {
+// After the world steps: wasted and busted end the run, and finishing
+// the last job opens the complete screen once.
+function settleScreen() {
   if (state.wasted) {
     screen = 'wasted';
     announce('Wasted.');
@@ -142,8 +146,9 @@ function updateScreenAfterPlay() {
   }
 }
 
-// One frame of play: read the pause/overlay keys, step the world in fixed
-// 1/60 s slices, drain world events into the HUD, and update the screens.
+// One frame of play: read the pause/overlay keys, step the world in
+// fixed 1/60 s slices, drain world events into the HUD, and update the
+// screens.
 function playFrame(frameDt) {
   // Pause is read BEFORE the step loop: endFrame() at the end of the
   // frame would otherwise clear the press before this check ever saw it.
@@ -152,8 +157,8 @@ function playFrame(frameDt) {
     else if (screen === 'pause') screen = 'play';
   }
   if (screen === 'play') {
-    handleOverlayKeys();
-    followCamera(frameDt);
+    readOverlayKeys();
+    steerCamera(frameDt);
     // Garage and job-list overlays freeze the world while open.
     if (!state.garageOpen && !state.missionsOpen) {
       stepAccumulator += frameDt;
@@ -169,7 +174,7 @@ function playFrame(frameDt) {
     // Drop any presses that arrived while the world was frozen, so a
     // stale key cannot fire the moment an overlay closes.
     input.endFrame();
-    updateScreenAfterPlay();
+    settleScreen();
     audio.engine(state.player.car ? Math.abs(state.player.car.speed) / 30 : 0, !!state.player.car);
     audio.siren(state.player.wanted > 0);
   } else if (screen === 'title') {
@@ -227,8 +232,9 @@ function runShot(name) {
   requestAnimationFrame(paint);
 }
 
-// Diagnostics handle for headless tests (FPS, missions, touch). Read-only
-// except for the explicit test helpers below; the game never uses it.
+// Diagnostics handle for headless tests (FPS, missions, touch).
+// Read-only except for the explicit test helpers below; the game never
+// uses it.
 function buildTestHandle() {
   const fakeInput = {
     held: {},
@@ -307,7 +313,7 @@ function buildTestHandle() {
       resetInPlace(state, seed);
     },
     start(fresh) {
-      startGame(fresh);
+      beginGame(fresh);
     },
   };
 }

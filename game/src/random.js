@@ -1,24 +1,39 @@
-// Deterministic dice for Solmar Bay. One mulberry32 stream per seed, so a
-// given seed always deals the same city, the same traffic and the same
-// screenshots — the world never surprises the tests twice differently.
+// Seeded dice for Solmar Bay. One stream per seed, so a given seed always
+// deals the same city, the same traffic and the same screenshots. The
+// stream is a xorshift32 generator warmed up at construction, which keeps
+// early draws from clustering near the seed value.
 export function createRandom(seedValue) {
-  let state = seedValue >>> 0;
-  function next() {
-    state = (state + 0x6d2b79f5) | 0;
-    let mix = Math.imul(state ^ (state >>> 15), 1 | state);
-    mix = (mix + Math.imul(mix ^ (mix >>> 7), 61 | mix)) ^ mix;
-    return ((mix ^ (mix >>> 14)) >>> 0) / 4294967296;
+  let word = (seedValue >>> 0) || 0x9e3779b9;
+  // Warm the state so the first draws do not betray the seed.
+  for (let i = 0; i < 8; i += 1) {
+    word ^= word << 13;
+    word ^= word >>> 17;
+    word ^= word << 5;
+    word >>>= 0;
+  }
+  function draw() {
+    word ^= word << 13;
+    word ^= word >>> 17;
+    word ^= word << 5;
+    word >>>= 0;
+    return word / 4294967296;
   }
   const dice = {
-    next,
-    range(lo, hi) {
-      return lo + next() * (hi - lo);
+    next: draw,
+    range(low, high) {
+      return low + draw() * (high - low);
     },
-    int(lo, hi) {
-      return Math.floor(dice.range(lo, hi + 1));
+    int(low, high) {
+      return low + Math.floor(draw() * (high - low + 1));
     },
-    pick(list) {
-      return list[Math.floor(next() * list.length)];
+    pick(entries) {
+      return entries[Math.floor(draw() * entries.length)];
+    },
+    chance(p) {
+      return draw() < p;
+    },
+    coin() {
+      return draw() < 0.5;
     },
   };
   return dice;
