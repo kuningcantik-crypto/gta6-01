@@ -53,15 +53,20 @@ async function main() {
 
   // 5. Settings: O opens the panel, a row button flips a setting and it persists.
   await tapKey(send, 'KeyO', 'o');
+  // Headless SwiftShader runs ~1 FPS, so poll for the state instead of a
+  // fixed sleep: the overlay key is only read once per rendered frame.
+  const opened = await waitFor(send, `window.__solmar.state.settingsOpen === true`, 15000);
   await sleep(400);
   const open = await evalJs(send, `document.getElementById('screen-settings').style.display`);
-  check('O opens the settings screen', open === 'flex', `display=${open}`);
+  check('O opens the settings screen', opened && open === 'flex', `display=${open}`);
   const savedBefore = await evalJs(send, `localStorage.getItem('solmar-settings-v1')`);
   await evalJs(send, `document.querySelector('[data-setting="showFps"]').click()`);
   await sleep(200);
   const savedAfter = await evalJs(send, `localStorage.getItem('solmar-settings-v1')`);
   const parsed = savedAfter ? JSON.parse(savedAfter) : {};
   check('flipping FPS persists to localStorage', parsed.showFps === true, `before=${savedBefore} after=${savedAfter}`);
+  // The FPS line only appears on the next rendered frame after the flip.
+  await waitFor(send, `document.getElementById('fps-line').style.display === 'block'`, 15000);
   const fpsShown = await evalJs(send, `document.getElementById('fps-line').style.display`);
   check('FPS line appears once enabled', fpsShown === 'block', `display=${fpsShown}`);
 

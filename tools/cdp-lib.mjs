@@ -5,27 +5,31 @@ import { writeFileSync } from 'node:fs';
 
 const CHROME = process.env.CHROME_BIN || 'google-chrome';
 
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function chromeFlags(port, profile, width, height, mobile) {
-  const flags = [
-    '--headless=new',
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${profile}`,
-    '--no-sandbox',
-    '--disable-gpu-sandbox',
-    '--use-angle=swiftshader',
-    '--enable-unsafe-swiftshader',
-    '--no-first-run',
-    '--disable-extensions',
-    '--mute-audio',
-    `--window-size=${width},${height}`,
-    '--hide-scrollbars',
+function flagList(port, profile, width, height, mobile) {
+  const pairs = [
+    ['--headless', 'new'],
+    ['--remote-debugging-port', String(port)],
+    ['--user-data-dir', profile],
+    ['--no-sandbox', null],
+    ['--disable-gpu-sandbox', null],
+    ['--use-angle', 'swiftshader'],
+    ['--enable-unsafe-swiftshader', null],
+    ['--no-first-run', null],
+    ['--disable-extensions', null],
+    ['--mute-audio', null],
+    ['--window-size', `${width},${height}`],
+    ['--hide-scrollbars', null],
   ];
   if (mobile) {
-    flags.push('--user-agent=Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0 Mobile Safari/537.36');
+    pairs.push(['--user-agent', 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0 Mobile Safari/537.36']);
   }
-  return flags;
+  const out = [];
+  for (const [name, value] of pairs) {
+    out.push(value === null ? name : `${name}=${value}`);
+  }
+  return out;
 }
 
 // Each launch gets a fresh debugging port and profile, so a lingering
@@ -33,47 +37,53 @@ function chromeFlags(port, profile, width, height, mobile) {
 export async function launchChrome(width, height, mobile) {
   const port = 9400 + Math.floor(Math.random() * 500);
   const profile = `/tmp/chrome-profile-${port}`;
-  const child = spawn(CHROME, chromeFlags(port, profile, width, height, mobile), {stdio: 'ignore'});
+  const child = spawn(CHROME, flagList(port, profile, width, height, mobile), { stdio: 'ignore' });
   let up = false;
-  for (let i = 0; i < 60 && !up; i += 1) {
+  for (let attempt = 0; attempt < 60 && !up; attempt += 1) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json/version`);
       up = res.ok;
-    } catch { /* not up yet */ }
+    } catch {
+      // Not listening yet; try again after a short pause.
+    }
     if (!up) await sleep(250);
   }
   if (!up) throw new Error('Chrome did not start');
-  return {child, port};
+  return { child, port };
 }
 
 export async function connect(port) {
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const page = targets.find((t) => t.type === 'page');
   const ws = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-  let nextId = 0;
+  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+  let nextId = 1;
   const pending = new Map();
   const events = [];
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    const handler = msg.id ? pending.get(msg.id) : null;
-    if (handler) {
+    const hasId = msg.id !== undefined && msg.id !== null;
+    const entry = hasId ? pending.get(msg.id) : undefined;
+    if (entry) {
       pending.delete(msg.id);
-      handler(msg);
+      clearTimeout(entry.timer);
+      if (msg.error) entry.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+      else entry.resolve(msg);
     } else if (msg.method) {
       events.push(msg);
     }
   };
   const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const mid = ++nextId;
+    const id = nextId;
+    nextId += 1;
     const timer = setTimeout(() => {
-      pending.delete(mid);
+      pending.delete(id);
       reject(new Error(`CDP timeout: ${method}`));
     }, 30000);
-    pending.set(mid, (msg) => { clearTimeout(timer); resolve(msg); });
-    ws.send(JSON.stringify({id: mid, method, params}));
+    pending.set(id, { resolve, reject, timer });
+    ws.send(JSON.stringify({ id, method, params }));
   });
-  return {ws, send, events};
+  return { ws, send, events };
 }
 
 export async function newTab(send, url, width, height, mobile) {
@@ -81,17 +91,17 @@ export async function newTab(send, url, width, height, mobile) {
   await send('Runtime.enable');
   await send('Log.enable');
   if (mobile) {
-    await send('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 2, mobile: true});
-    await send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 5});
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: true });
+    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   } else {
-    await send('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 1, mobile: false});
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   }
-  await send('Page.navigate', {url});
+  await send('Page.navigate', { url });
 }
 
 export async function evalJs(send, expression, awaitPromise = false) {
-  const res = await send('Runtime.evaluate', {expression, awaitPromise, returnByValue: true});
-  if (res.result?.exceptionDetails) return {error: res.result.exceptionDetails};
+  const res = await send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true });
+  if (res.result?.exceptionDetails) return { error: res.result.exceptionDetails };
   return res.result?.result?.value;
 }
 
@@ -119,15 +129,25 @@ export async function waitFor(send, expr, timeoutMs = 30000) {
   return false;
 }
 
+const SPECIAL_KEYS = {
+  ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39,
+  Escape: 27, Enter: 13, ' ': 32, Tab: 9,
+};
+
 function virtualKey(k) {
-  return k.length === 1 ? k.toUpperCase().charCodeAt(0) : 0;
+  if (k in SPECIAL_KEYS) return SPECIAL_KEYS[k];
+  if (k.length === 1) return k.toUpperCase().charCodeAt(0);
+  return 0;
 }
+
 export async function keyDown(send, code, k) {
-  await send('Input.dispatchKeyEvent', {type: 'keyDown', code, key: k, windowsVirtualKeyCode: virtualKey(k)});
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', code, key: k, windowsVirtualKeyCode: virtualKey(k) });
 }
+
 export async function keyUp(send, code, k) {
-  await send('Input.dispatchKeyEvent', {type: 'keyUp', code, key: k, windowsVirtualKeyCode: virtualKey(k)});
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', code, key: k, windowsVirtualKeyCode: virtualKey(k) });
 }
+
 export async function tapKey(send, code, k) {
   await keyDown(send, code, k);
   await sleep(60);
@@ -135,20 +155,20 @@ export async function tapKey(send, code, k) {
 }
 
 export async function screenshot(send, path, quality = 80) {
-  const res = await send('Page.captureScreenshot', {format: 'jpeg', quality});
+  const res = await send('Page.captureScreenshot', { format: 'jpeg', quality });
   writeFileSync(path, Buffer.from(res.result.data, 'base64'));
   return path;
 }
 
 export async function touchTap(send, x, y) {
-  await send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x, y, id: 1}]});
-  await send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
 // Drag one finger from (x0, y0) to (x1, y1) and lift it. The caller
 // decides how long to hold the drag by sleeping between the calls.
 export async function touchDrag(send, x0, y0, x1, y1, id = 1) {
-  await send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x: x0, y: y0, id}]});
-  await send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: x1, y: y1, id}]});
-  await send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0, id }] });
+  await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x1, y: y1, id }] });
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }

@@ -41,6 +41,7 @@ let stepAccumulator = 0;
 let lastFrame = performance.now();
 let completeShown = false;
 let testShoot = false;
+let photoMode = false;
 // Auto performance mode: if frames stay slow, shed expensive effects once.
 let lowEffects = false;
 let slowTime = 0;
@@ -137,6 +138,10 @@ createTouchControls(input, {
 function readOverlayKeys() {
   if (input.wasPressed('missions')) state.missionsOpen = !state.missionsOpen;
   if (input.wasPressed('settings')) state.settingsOpen = !state.settingsOpen;
+  if (input.wasPressed('photo') && screen === 'play') {
+    photoMode = !photoMode;
+    hud.setPhotoMode(photoMode);
+  }
   if (input.wasPressed('garage')) {
     if (Math.hypot(state.player.x - CITY.safehouse.x, state.player.z - CITY.safehouse.z) < 10) {
       state.garageOpen = !state.garageOpen;
@@ -182,6 +187,12 @@ function playFrame(frameDt) {
   if (input.wasPressed('pause')) {
     if (screen === 'play') screen = 'pause';
     else if (screen === 'pause') screen = 'play';
+  }
+  // Leaving play (pause, wasted, busted, complete) always exits photo
+  // mode, so an overlay can never be hidden behind a hidden HUD.
+  if (screen !== 'play' && photoMode) {
+    photoMode = false;
+    hud.setPhotoMode(false);
   }
   if (screen === 'play') {
     readOverlayKeys();

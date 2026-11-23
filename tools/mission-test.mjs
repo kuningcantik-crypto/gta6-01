@@ -7,27 +7,31 @@
 import { launchChrome, connect, newTab, evalJs, consoleErrors, sleep, tapKey, waitFor } from './cdp-lib.mjs';
 
 const URL = process.argv[2] || 'http://127.0.0.1:8080/?seed=7';
-const S = (expr) => `(() => { const s = window.__solmar; return ${expr}; })()`;
 
-const {child, port} = await launchChrome(1280, 800, false);
+function wrap(expr) {
+  return `(() => { const s = window.__solmar; return ${expr}; })()`;
+}
+
+const { child, port } = await launchChrome(1280, 800, false);
 const results = [];
 try {
-  const {send, events} = await connect(port);
+  const { send, events } = await connect(port);
   await newTab(send, 'http://127.0.0.1:8080/?seed=7', 1280, 800, false);
   const booted = await waitFor(send, '!!window.__solmar', 60000);
   if (!booted) throw new Error('game did not boot (__solmar missing)');
-  await evalJs(send, S(`s.start(true), 'started'`));
+  await evalJs(send, wrap(`s.start(true), 'started'`));
 
-  const missionInfo = () => evalJs(send, S('s.mission()'));
-  const stepN = (n, held = {}, yaw = 0) => evalJs(send, S(`s.step(${n}, ${JSON.stringify(held)}, ${yaw}), 1`));
-  const teleportTo = (x, z) => evalJs(send, S(`s.teleport(${x}, ${z})`));
+  const call = (expr) => evalJs(send, wrap(expr));
+  const missionInfo = () => call('s.mission()');
+  const stepN = (n, held = {}, yaw = 0) => call(`s.step(${n}, ${JSON.stringify(held)}, ${yaw}), 1`);
+  const goTo = (x, z) => call(`s.teleport(${x}, ${z})`);
 
   async function ramCourier() {
     // Ram it in ONE synchronous evaluate: round-tripping per hit lets the
     // live game loop decelerate the car and drive the courier away between
     // calls. This drives the player car into the courier with the real
     // physics until it stops, then reports how it went.
-    const ramResult = await evalJs(send, S(`(() => {
+    const ramResult = await call(`(() => {
       const before = { missionIndex: s.state.missionIndex, missionStep: s.state.missionStep, stepKind: (s.mission() || {}).stepKind, targetCar: !!s.state.targetCar };
       s.step(10); // ensureTargetCar spawns the courier
       const after = { missionIndex: s.state.missionIndex, missionStep: s.state.missionStep, targetCar: !!s.state.targetCar };
@@ -45,18 +49,18 @@ try {
       }
       const t = s.state.targetCar;
       return { rammed: !!(t.disabled || (t.damage || 0) >= 100), hits: 20, damage: t ? t.damage : null, before, after, log };
-    })()`));
+    })()`);
     console.log(`  ram: ${JSON.stringify(ramResult)}`);
     if (!ramResult.rammed) {
       // Fallback: finish it with the pistol (also a real path).
       for (let shot = 0; shot < 6; shot += 1) {
-        const cur = await evalJs(send, S(`s.state.targetCar ? {x: s.state.targetCar.x, z: s.state.targetCar.z, damage: s.state.targetCar.damage || 0, disabled: !!s.state.targetCar.disabled} : null`));
+        const cur = await call(`s.state.targetCar ? {x: s.state.targetCar.x, z: s.state.targetCar.z, damage: s.state.targetCar.damage || 0, disabled: !!s.state.targetCar.disabled} : null`);
         if (!cur || cur.disabled || cur.damage >= 100) break;
-        await evalJs(send, S(`s.state.player.bustedTimer = 0; s.state.busted = false;`));
-        await evalJs(send, S(`s.teleport(${cur.x - 8}, ${cur.z - 8}); s.state.player.onFoot = true; s.state.player.car = null;`));
-        const p = await evalJs(send, S(`({x: s.state.player.x, z: s.state.player.z})`));
+        await call(`s.state.player.bustedTimer = 0; s.state.busted = false;`);
+        await call(`s.teleport(${cur.x - 8}, ${cur.z - 8}); s.state.player.onFoot = true; s.state.player.car = null;`);
+        const p = await call(`({x: s.state.player.x, z: s.state.player.z})`);
         const yaw2 = Math.atan2(cur.x - p.x, cur.z - p.z);
-        await evalJs(send, S(`s.fire()`));
+        await call(`s.fire()`);
         await stepN(16, {}, yaw2);
       }
     }
@@ -64,19 +68,19 @@ try {
   }
 
   async function shootCops(index) {
-    await evalJs(send, S(`s.setWanted(3)`));
+    await call(`s.setWanted(3)`);
     await stepN(120); // let police arrive
     for (let k = 0; k < 14; k += 1) {
       const done = await missionInfo();
       if (done.eliminated >= 3 || done.missionIndex !== index) break;
       // Stay unbusted and keep the heat on while shooting on foot.
-      await evalJs(send, S(`s.state.player.bustedTimer = 0; s.state.busted = false; if (s.state.player.wanted < 2) s.setWanted(3);`));
-      const cop = await evalJs(send, S(`(() => { const c = s.state.cars.find(c => c.kind === 'police' && !c.disabled); return c ? {x: c.x, z: c.z, damage: c.damage || 0} : null; })()`));
+      await call(`s.state.player.bustedTimer = 0; s.state.busted = false; if (s.state.player.wanted < 2) s.setWanted(3);`);
+      const cop = await call(`(() => { const c = s.state.cars.find(c => c.kind === 'police' && !c.disabled); return c ? {x: c.x, z: c.z, damage: c.damage || 0} : null; })()`);
       if (!cop) { await stepN(60); continue; }
-      await evalJs(send, S(`s.teleport(${cop.x - 8}, ${cop.z}); s.state.player.onFoot = true; if (s.state.player.car) { s.state.player.car.kind = 'parked'; s.state.player.car = null; }`));
-      const p = await evalJs(send, S(`({x: s.state.player.x, z: s.state.player.z})`));
+      await call(`s.teleport(${cop.x - 8}, ${cop.z}); s.state.player.onFoot = true; if (s.state.player.car) { s.state.player.car.kind = 'parked'; s.state.player.car = null; }`);
+      const p = await call(`({x: s.state.player.x, z: s.state.player.z})`);
       const yaw = Math.atan2(cop.x - p.x, cop.z - p.z);
-      await evalJs(send, S(`s.fire()`));
+      await call(`s.fire()`);
       await stepN(16, {}, yaw);
     }
     await stepN(10);
@@ -84,34 +88,51 @@ try {
 
   // How each step kind is played: move to the real target and step the
   // real world until the step completes.
-  const STEP_PLAYERS = {
-    goto: async (m) => {
-      if (!m.target) {
-        // anyCar step: put Rico in a car.
-        await evalJs(send, S(`s.putInCar(s.state.player.x, s.state.player.z, s.state.player.angle)`));
-        await stepN(5);
-      } else {
-        await teleportTo(m.target.x, m.target.z);
+  async function playStep(kind, m, index) {
+    switch (kind) {
+      case 'goto':
+        if (!m.target) {
+          // anyCar step: put Rico in a car.
+          await call(`s.putInCar(s.state.player.x, s.state.player.z, s.state.player.angle)`);
+          await stepN(5);
+        } else {
+          await goTo(m.target.x, m.target.z);
+          await stepN(10);
+        }
+        break;
+      case 'timed':
+      case 'pickup':
+      case 'deliver':
+      case 'collect':
+        await goTo(m.target.x, m.target.z);
         await stepN(10);
-      }
-    },
-    timed: async (m) => { await teleportTo(m.target.x, m.target.z); await stepN(10); },
-    pickup: async (m) => { await teleportTo(m.target.x, m.target.z); await stepN(10); },
-    deliver: async (m) => { await teleportTo(m.target.x, m.target.z); await stepN(10); },
-    collect: async (m) => { await teleportTo(m.target.x, m.target.z); await stepN(10); },
-    wanted: async (m) => {
-      await evalJs(send, S(`s.setWanted(${m.stepLabel.match(/\d+/)?.[0] || 2})`));
-      await stepN(5);
-    },
-    hold: async (m) => { await teleportTo(m.target.x, m.target.z); await stepN(400); },
-    race: async (m) => { await teleportTo(m.target.x, m.target.z); await stepN(5); },
-    ram: async () => { await ramCourier(); },
-    eliminate: async (m, index) => { await shootCops(index); },
-  };
+        break;
+      case 'wanted':
+        await call(`s.setWanted(${m.stepLabel.match(/\d+/)?.[0] || 2})`);
+        await stepN(5);
+        break;
+      case 'hold':
+        await goTo(m.target.x, m.target.z);
+        await stepN(400);
+        break;
+      case 'race':
+        await goTo(m.target.x, m.target.z);
+        await stepN(5);
+        break;
+      case 'ram':
+        await ramCourier();
+        break;
+      case 'eliminate':
+        await shootCops(index);
+        break;
+      default:
+        throw new Error(`unknown step kind ${kind}`);
+    }
+  }
 
   async function playMission(index) {
     const start = await missionInfo();
-    await evalJs(send, S(`s.setMission(${index}), s.reset(), s.start(true), s.setMission(${index})`));
+    await call(`s.setMission(${index}), s.reset(), s.start(true), s.setMission(${index})`);
     // Note: reset() rebuilds the world; setMission after start pins the mission.
     const cash0 = (await missionInfo()).cash;
     let guard = 0;
@@ -120,15 +141,13 @@ try {
       const m = await missionInfo();
       if (!m || m.done || m.missionIndex > index) break;
       if (m.missionIndex !== index) break; // mission completed
-      const play = STEP_PLAYERS[m.stepKind];
-      if (!play) throw new Error(`unknown step kind ${m.stepKind}`);
-      await play(m, index);
+      await playStep(m.stepKind, m, index);
     }
     const end = await missionInfo();
     const passed = end.missionIndex > index || end.allMissionsDone;
-    const cashDelta = (end.cash ?? (await evalJs(send, S(`s.state.player.cash`)))) - cash0;
-    const rp = end.rp ?? (await evalJs(send, S(`s.state.player.rp`)));
-    return {index, id: start.id, title: start.title, passed, cashDelta, rp, guard, end};
+    const cashDelta = (end.cash ?? (await call(`s.state.player.cash`))) - cash0;
+    const rp = end.rp ?? (await call(`s.state.player.rp`));
+    return { index, id: start.id, title: start.title, passed, cashDelta, rp, guard, end };
   }
 
   for (let i = 0; i < 12; i += 1) {
@@ -137,37 +156,37 @@ try {
       results.push(r);
       console.log(`${r.passed ? 'PASS' : 'FAIL'} #${i + 1} ${r.title} (cash +$${r.cashDelta}, rp ${r.rp}, steps ${r.guard})`);
     } catch (e) {
-      results.push({index: i, passed: false, error: String(e)});
+      results.push({ index: i, passed: false, error: String(e) });
       console.log(`FAIL #${i + 1}: ${e}`);
     }
   }
 
   // Systems checks on a fresh world.
-  await evalJs(send, S(`s.reset(), s.start(true)`));
-  await evalJs(send, S(`s.setWanted(3)`));
+  await call(`s.reset(), s.start(true)`);
+  await call(`s.setWanted(3)`);
   await stepN(120);
-  const heli = await evalJs(send, S(`s.state.heli.active`));
+  const heli = await call(`s.state.heli.active`);
   console.log(`${heli ? 'PASS' : 'FAIL'} helicopter active at 3 stars`);
-  await evalJs(send, S(`s.setWanted(4)`));
+  await call(`s.setWanted(4)`);
   await stepN(60);
-  const blocks = await evalJs(send, S(`s.state.cars.filter(c => c.roadblock).length`));
+  const blocks = await call(`s.state.cars.filter(c => c.roadblock).length`);
   console.log(`${blocks >= 1 ? 'PASS' : 'FAIL'} roadblocks at 4 stars (${blocks} cars)`);
-  await evalJs(send, S(`s.state.player.rp = 650`));
+  await call(`s.state.player.rp = 650`);
   await stepN(5);
-  const smg = await evalJs(send, S(`s.state.player.weapons[2].owned`));
+  const smg = await call(`s.state.player.weapons[2].owned`);
   console.log(`${smg ? 'PASS' : 'FAIL'} SMG unlocks at 250 RP (rp 650)`);
-  const radio0 = await evalJs(send, S(`s.state.player.radioStation`));
+  const radio0 = await call(`s.state.player.radioStation`);
   // A real key press through the live game loop (the test-step fake input
   // cannot see real key presses).
   await tapKey(send, 'KeyC', 'c');
   await sleep(2500); // headless SwiftShader runs ~1 FPS; give the loop a frame
-  const radio1 = await evalJs(send, S(`s.state.player.radioStation`));
+  const radio1 = await call(`s.state.player.radioStation`);
   console.log(`${radio1 !== radio0 ? 'PASS' : 'FAIL'} radio cycles (${radio0} -> ${radio1})`);
   const errs = consoleErrors(events);
   console.log('console errors:', errs.length ? errs : 'none');
   const fails = results.filter((r) => !r.passed).length + (heli ? 0 : 1) + (blocks >= 1 ? 0 : 1) + (smg ? 0 : 1) + (radio1 !== radio0 ? 0 : 1);
   console.log(`\nMissions: ${results.filter((r) => r.passed).length}/12 passed. Overall fails: ${fails}`);
-  console.log(JSON.stringify({missions: results.map((r) => ({index: r.index, title: r.title, passed: r.passed})), heli, roadblocks: blocks >= 1, smg, radio: radio1 !== radio0, fails}));
+  console.log(JSON.stringify({ missions: results.map((r) => ({ index: r.index, title: r.title, passed: r.passed })), heli, roadblocks: blocks >= 1, smg, radio: radio1 !== radio0, fails }));
   process.exit(fails ? 1 : 0);
 } finally {
   child.kill();

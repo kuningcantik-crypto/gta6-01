@@ -6,36 +6,54 @@
 //   node tools/cdp.mjs eval <url> <js-expr>         -- print Runtime.evaluate result
 import { launchChrome, connect, newTab, evalJs, consoleErrors, waitFor, keyDown, keyUp, screenshot, sleep } from './cdp-lib.mjs';
 
+const argAt = (i, fallback = undefined) => process.argv[i] ?? fallback;
+
 async function measureFps(send, seconds) {
   const expr = `new Promise((resolve) => {
-    let frames = 0; const t0 = performance.now();
-    const times = [];
-    let last = t0;
-    function tick(now) {
-      frames += 1; times.push(now - last); last = now;
-      if (now - t0 < ${seconds * 1000}) requestAnimationFrame(tick);
-      else {
-        times.sort((a, b) => a - b);
-        const avg = times.reduce((a, b) => a + b, 0) / times.length;
-        resolve({ fps: +(frames / ((performance.now() - t0) / 1000)).toFixed(1),
-          avgMs: +avg.toFixed(2), p95Ms: +times[Math.floor(times.length * 0.95)].toFixed(2),
-          frames, calls: (window.__rendererInfo ? window.__rendererInfo() : null) });
+    const deltas = [];
+    let frames = 0;
+    let last = performance.now();
+    const t0 = last;
+    const tick = (now) => {
+      frames += 1;
+      deltas.push(now - last);
+      last = now;
+      if (now - t0 < ${seconds * 1000}) {
+        requestAnimationFrame(tick);
+      } else {
+        deltas.sort((a, b) => a - b);
+        const mean = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+        resolve({
+          fps: +(frames / ((performance.now() - t0) / 1000)).toFixed(1),
+          avgMs: +mean.toFixed(2),
+          p95Ms: +deltas[Math.floor(deltas.length * 0.95)].toFixed(2),
+          frames,
+          calls: (window.__rendererInfo ? window.__rendererInfo() : null),
+        });
       }
-    }
+    };
     requestAnimationFrame(tick);
   })`;
   return evalJs(send, expr, true);
 }
 
-async function runFps() {
-  const url = process.argv[3] || 'http://127.0.0.1:8080/';
-  const seconds = Number(process.argv[4] || 6);
-  const keys = (process.argv[5] || '').split(',').filter(Boolean);
+async function withBrowser(width, height, mobile, body) {
+  const { child, port } = await launchChrome(width, height, mobile);
+  try {
+    const { send, events } = await connect(port);
+    return await body(send, events);
+  } finally {
+    child.kill();
+  }
+}
+
+async function doFps() {
+  const url = argAt(3, 'http://127.0.0.1:8080/');
+  const seconds = Number(argAt(4, 6));
+  const keys = (argAt(5, '')).split(',').filter(Boolean);
   const fw = Number(process.env.FPS_W || 1280);
   const fh = Number(process.env.FPS_H || 800);
-  const {child, port} = await launchChrome(fw, fh, false);
-  try {
-    const {send, events} = await connect(port);
+  await withBrowser(fw, fh, false, async (send, events) => {
     await newTab(send, url, fw, fh, false);
     await sleep(2500);
     if (!process.env.FPS_TITLE) {
@@ -49,38 +67,34 @@ async function runFps() {
     for (const k of keys) await keyDown(send, `Key${k}`, k.toLowerCase());
     const result = await measureFps(send, seconds);
     for (const k of keys) await keyUp(send, `Key${k}`, k.toLowerCase());
-    console.log(JSON.stringify({url, seconds, keys, ...result, consoleErrors: consoleErrors(events)}, null, 2));
-  } finally { child.kill(); }
+    console.log(JSON.stringify({ url, seconds, keys, ...result, consoleErrors: consoleErrors(events) }, null, 2));
+  });
 }
 
-async function runShot() {
-  const url = process.argv[3];
-  const out = process.argv[4];
+async function doShot() {
+  const url = argAt(3);
+  const out = argAt(4);
   if (!url || !out) {
     console.log('usage: cdp.mjs shot <url> <out.jpg> [w] [h] [mobile]');
     process.exit(1);
   }
-  const width = Number(process.argv[5] || 1280);
-  const height = Number(process.argv[6] || 800);
-  const mobile = process.argv[7] === 'mobile';
-  const {child, port} = await launchChrome(width, height, mobile);
-  try {
-    const {send, events} = await connect(port);
+  const width = Number(argAt(5, 1280));
+  const height = Number(argAt(6, 800));
+  const mobile = argAt(7) === 'mobile';
+  await withBrowser(width, height, mobile, async (send, events) => {
     await newTab(send, url, width, height, mobile);
     const ready = await waitFor(send, 'window.__shotReady === true');
     if (!ready) console.log('WARN: __shotReady never set; screenshotting anyway');
     await sleep(400);
     await screenshot(send, out);
-    console.log(JSON.stringify({out, ready, consoleErrors: consoleErrors(events)}, null, 2));
-  } finally { child.kill(); }
+    console.log(JSON.stringify({ out, ready, consoleErrors: consoleErrors(events) }, null, 2));
+  });
 }
 
-async function runEval() {
-  const url = process.argv[3];
-  const expr = process.argv[4];
-  const {child, port} = await launchChrome(1280, 800, false);
-  try {
-    const {send, events} = await connect(port);
+async function doEval() {
+  const url = argAt(3);
+  const expr = argAt(4);
+  await withBrowser(1280, 800, false, async (send, events) => {
     await newTab(send, url, 1280, 800, false);
     // The game module can take a while to boot under SwiftShader; wait for
     // the diagnostics handle instead of assuming a fixed sleep is enough.
@@ -90,10 +104,10 @@ async function runEval() {
     console.log(JSON.stringify(v, null, 2));
     const errs = consoleErrors(events);
     if (errs.length) console.log('ERRORS:', JSON.stringify(errs, null, 2));
-  } finally { child.kill(); }
+  });
 }
 
-const COMMANDS = {fps: runFps, shot: runShot, eval: runEval};
+const COMMANDS = { fps: doFps, shot: doShot, eval: doEval };
 const cmd = process.argv[2];
 const run = COMMANDS[cmd];
 if (!run) {

@@ -77,6 +77,7 @@ export function createHud(state, callbacks) {
   let tickerTimer = 6;
   let settings = null;
   let fpsSmooth = 60;
+  let photoMode = false;
   const cache = {};
   // Diagnostics handle for headless tests (backdrop-guard timing).
   window.__hudCache = cache;
@@ -479,7 +480,9 @@ export function createHud(state, callbacks) {
       fpsSmooth = fpsSmooth * 0.92 + instant * 0.08;
     }
     // The in-game HUD only exists during play; menus get a clean frame.
-    el.hud.style.display = screen === 'play' ? 'block' : 'none';
+    // Photo mode hides it even during play — update() runs every frame,
+    // so the flag has to live here or the hide would be overwritten.
+    el.hud.style.display = (screen === 'play' && !photoMode) ? 'block' : 'none';
     // The keyboard hint is a play aid, not a screenshot prop.
     if (el.controls) el.controls.style.display = window.__isShot ? 'none' : '';
     refreshVitals(rico);
@@ -536,5 +539,14 @@ export function createHud(state, callbacks) {
   return {
     update, showMessage, showGarageMessage,
     setSettings(next) { settings = next; refreshSettingsLabels(); },
+    // Photo mode hides every HUD panel (and the touch controls, which
+    // live inside #hud) so the frame is just the city. The hint sits
+    // outside #hud, so it stays visible until the player exits.
+    setPhotoMode(on) {
+      photoMode = on;
+      el.hud.style.display = on ? 'none' : '';
+      const hint = document.getElementById('photo-hint');
+      if (hint) hint.style.display = on ? 'block' : 'none';
+    },
   };
 }

@@ -148,6 +148,7 @@
   }
   #citylife { position: absolute; left: 12px; top: 340px; font-size: 12px; line-height: 1.5; }
   #fps-line { position: absolute; right: 12px; top: 12px; font-size: 12px; color: #7dff9a; display: none; }
+  #photo-hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); font-size: 13px; letter-spacing: 2px; color: #fff; background: rgba(0,0,0,.55); padding: 6px 14px; border-radius: 999px; display: none; z-index: 40; pointer-events: none; }
   .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 8px 0; font-size: 15px; }
   .setting-row button { min-width: 90px; padding: 6px 10px; font-size: 14px; }
 </style>
@@ -186,7 +187,7 @@
   <div id="ticker">SOLMAR WIRE — SBPD: "Report suspicious vans. Reward $150."</div>
   <div id="crosshair"></div>
   <div id="flash"><div id="flash-title"></div><div id="flash-reward"></div></div>
-  <div id="controls">WASD drive / walk &nbsp;·&nbsp; E enter car &nbsp;·&nbsp; Click shoot &nbsp;·&nbsp; F punch<br>1–7 weapons · Q cycle · C radio · Z/X/V crew · G garage · M jobs · O settings<br>R reload &nbsp;·&nbsp; Space jump &nbsp;·&nbsp; Shift run &nbsp;·&nbsp; Esc pause</div>
+  <div id="controls">WASD drive / walk &nbsp;·&nbsp; E enter car &nbsp;·&nbsp; Click shoot &nbsp;·&nbsp; F punch<br>1–7 weapons · Q cycle · C radio · Z/X/V crew · G garage · M jobs · O settings<br>R reload &nbsp;·&nbsp; Space jump &nbsp;·&nbsp; Shift run &nbsp;·&nbsp; Esc pause &nbsp;·&nbsp; H photo mode</div>
   <div id="touch-ui">
     <div id="joystick"><div id="stick"></div></div>
     <button id="btn-gas" class="tbtn">GAS</button>
@@ -197,6 +198,8 @@
     <button id="btn-msn" class="tbtn">JOBS</button>
   </div>
 </div>
+
+<div id="photo-hint">PHOTO MODE — press H to exit</div>
 
 <div id="screen-title" class="screen">
   <h1>SOLMAR BAY</h1>

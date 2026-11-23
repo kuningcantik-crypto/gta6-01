@@ -33,6 +33,7 @@ const KEYMAP = {
   KeyG: 'garage',
   KeyM: 'missions',
   KeyO: 'settings',
+  KeyH: 'photo',
 };
 
 // The shared core: held flags, one-shot edges, the shoot pulse and the
