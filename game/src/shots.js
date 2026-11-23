@@ -68,33 +68,50 @@ function putPlayerInCar(world, x, z, angle) {
   return car;
 }
 
-// Set `world` to the named scene and return how to paint it.
-export function stageShot(name, world, input) {
-  if (name === 'play') {
-    world.dialogue = {name: 'Lucia', role: 'Fixer', text: 'Rico, welcome home. First rule of Solmar: wheels before words. Steal a car and meet me at the Neon Pier.', timer: 60};
-    putPlayerInCar(world, -52, -100, 0);
-    driveAutopilot(world, input, [
-      {x: -52, z: 0}, {x: -52, z: 104}, {x: -52, z: 150},
-    ], 22);
-    return {screen: 'play', mode: 'follow', cameraYaw: world.player.angle};
+// A driving scene: stage the dialogue and the wanted level, put Rico in a
+// car on a road, and let the autopilot drive the waypoints for a fixed
+// number of seconds. The frame is what the drive really looks like.
+function driveScene(world, input, spec) {
+  if (spec.dialogue) {
+    world.dialogue = {name: spec.dialogue[0], role: spec.dialogue[1], text: spec.dialogue[2], timer: 60};
   }
-  if (name === 'chase') {
-    world.missionIndex = 2;
+  if (spec.missionIndex !== undefined) {
+    world.missionIndex = spec.missionIndex;
     world.missionStep = 0;
-    world.player.wanted = 3;
+  }
+  if (spec.wanted !== undefined) {
+    world.player.wanted = spec.wanted;
     world.player.crimeTimer = 0;
-    world.dialogue = {name: 'Mira', role: 'Driver', text: 'You want to drive for us? Prove it. Get the cops on your tail — then shake them at the safehouse.', timer: 60};
-    putPlayerInCar(world, 52, 100, Math.PI);
+  }
+  putPlayerInCar(world, spec.carAt[0], spec.carAt[1], spec.carAt[2]);
+  driveAutopilot(world, input, spec.waypoints, spec.seconds);
+  return {screen: 'play', mode: 'follow', cameraYaw: world.player.angle};
+}
+
+// Scenes, as data: each one stages the world and says how to paint it.
+const SHOT_SCENES = {
+  play(world, input) {
+    return driveScene(world, input, {
+      dialogue: ['Lucia', 'Fixer', 'Rico, welcome home. First rule of Solmar: wheels before words. Steal a car and meet me at the Neon Pier.'],
+      carAt: [-52, -100, 0],
+      waypoints: [{x: -52, z: 0}, {x: -52, z: 104}, {x: -52, z: 150}],
+      seconds: 22,
+    });
+  },
+  chase(world, input) {
     // Straight north on one road: no corner to wedge on, and only 8 s of
     // driving, so the police have just caught up — the car is still moving
     // fast, with the helicopter cone overhead, when the frame is taken.
     // Three stars keeps the heli up without roadblocks.
-    driveAutopilot(world, input, [
-      {x: 52, z: -52}, {x: 52, z: -140},
-    ], 8);
-    return {screen: 'play', mode: 'follow', cameraYaw: world.player.angle};
-  }
-  if (name === 'end') {
+    return driveScene(world, input, {
+      dialogue: ['Mira', 'Driver', 'You want to drive for us? Prove it. Get the cops on your tail — then shake them at the safehouse.'],
+      missionIndex: 2, wanted: 3,
+      carAt: [52, 100, Math.PI],
+      waypoints: [{x: 52, z: -52}, {x: 52, z: -140}],
+      seconds: 8,
+    });
+  },
+  end(world, input) {
     world.player.cash = 5200;
     world.player.rp = 3400;
     world.missionIndex = 12;
@@ -108,7 +125,16 @@ export function stageShot(name, world, input) {
       screen: 'play', mode: 'fixed',
       fixedCamera: {x: 0, y: 5.5, z: 168, lookX: 0, lookY: 3, lookZ: 196},
     };
-  }
-  for (let i = 0; i < 3 / STEP; i += 1) stepWorld(world, input, STEP, null, Math.PI);
-  return {screen: 'title', mode: 'aerial', cameraYaw: 0};
+  },
+  start(world, input) {
+    for (let i = 0; i < 3 / STEP; i += 1) stepWorld(world, input, STEP, null, Math.PI);
+    return {screen: 'title', mode: 'aerial', cameraYaw: 0};
+  },
+};
+
+// Set `world` to the named scene and return how to paint it. An unknown
+// name falls back to the title scene.
+export function stageShot(name, world, input) {
+  const scene = SHOT_SCENES[name] || SHOT_SCENES.start;
+  return scene(world, input);
 }

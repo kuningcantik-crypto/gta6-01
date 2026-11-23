@@ -102,6 +102,46 @@ createTouchControls(input, {
   onCamera: () => { cameraYaw += Math.PI * 0.5; },
 });
 
+// Overlay toggles live here, not in stepWorld: the world is frozen while
+// an overlay is open, so stepWorld would never read the key that is
+// supposed to close it. Only while playing, not on the title screen.
+function handleOverlayKeys() {
+  if (input.wasPressed('missions')) state.missionsOpen = !state.missionsOpen;
+  if (input.wasPressed('garage')) {
+    if (Math.hypot(state.player.x - CITY.safehouse.x, state.player.z - CITY.safehouse.z) < 10) {
+      state.garageOpen = !state.garageOpen;
+    } else {
+      hud.showMessage('Garage is at the safehouse — north-west corner.', 3);
+    }
+  }
+}
+
+// The camera follows the player's heading, nudged by mouse movement, and
+// only turns while the player is actually moving.
+function followCamera(frameDt) {
+  cameraYaw -= input.takeMouseDX() * 0.0035;
+  let diff = state.player.angle - cameraYaw;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  const speed = state.player.car ? Math.abs(state.player.car.speed) : (state.player.moving ? 6 : 0);
+  if (speed > 2) cameraYaw += diff * Math.min(1, frameDt * 1.8);
+}
+
+// After the world steps: wasted and busted end the run, and finishing the
+// last job opens the complete screen once.
+function updateScreenAfterPlay() {
+  if (state.wasted) {
+    screen = 'wasted';
+    announce('Wasted.');
+  } else if (state.busted) {
+    screen = 'busted';
+    announce('Busted.');
+  } else if (state.allMissionsDone && !completeShown) {
+    completeShown = true;
+    screen = 'complete';
+  }
+}
+
 // One frame of play: read the pause/overlay keys, step the world in fixed
 // 1/60 s slices, drain world events into the HUD, and update the screens.
 function playFrame(frameDt) {
@@ -111,28 +151,9 @@ function playFrame(frameDt) {
     if (screen === 'play') screen = 'pause';
     else if (screen === 'pause') screen = 'play';
   }
-  // Overlay toggles live here too, not in stepWorld: the world is frozen
-  // while an overlay is open, so stepWorld would never read the key that
-  // is supposed to close it. Only while playing, not on the title screen.
   if (screen === 'play') {
-    if (input.wasPressed('missions')) state.missionsOpen = !state.missionsOpen;
-    if (input.wasPressed('garage')) {
-      if (Math.hypot(state.player.x - CITY.safehouse.x, state.player.z - CITY.safehouse.z) < 10) {
-        state.garageOpen = !state.garageOpen;
-      } else {
-        hud.showMessage('Garage is at the safehouse — north-west corner.', 3);
-      }
-    }
-  }
-  if (screen === 'play') {
-    // Camera yaw follows the player's heading, nudged by mouse movement.
-    cameraYaw -= input.takeMouseDX() * 0.0035;
-    const targetYaw = state.player.angle;
-    let diff = targetYaw - cameraYaw;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    const speed = state.player.car ? Math.abs(state.player.car.speed) : (state.player.moving ? 6 : 0);
-    if (speed > 2) cameraYaw += diff * Math.min(1, frameDt * 1.8);
+    handleOverlayKeys();
+    followCamera(frameDt);
     // Garage and job-list overlays freeze the world while open.
     if (!state.garageOpen && !state.missionsOpen) {
       stepAccumulator += frameDt;
@@ -148,16 +169,7 @@ function playFrame(frameDt) {
     // Drop any presses that arrived while the world was frozen, so a
     // stale key cannot fire the moment an overlay closes.
     input.endFrame();
-    if (state.wasted) {
-      screen = 'wasted';
-      announce('Wasted.');
-    } else if (state.busted) {
-      screen = 'busted';
-      announce('Busted.');
-    } else if (state.allMissionsDone && !completeShown) {
-      completeShown = true;
-      screen = 'complete';
-    }
+    updateScreenAfterPlay();
     audio.engine(state.player.car ? Math.abs(state.player.car.speed) / 30 : 0, !!state.player.car);
     audio.siren(state.player.wanted > 0);
   } else if (screen === 'title') {

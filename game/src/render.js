@@ -412,6 +412,26 @@ export function createRenderer(canvas, state) {
     triangles: renderer.info.render.triangles,
   });
 
+  // One frame's sync work, as a list: each entry updates one family of
+  // objects from the live state. The wrecked-car smoke check is a sync
+  // entry too. render() just walks the list with the player and the delta.
+  const SYNC_STEPS = [
+    (p) => syncPlayerFigure(playerFigure, p),
+    (p, dt) => syncCarFigures(scene, carFigures, state.cars, dt),
+    (p, dt) => {
+      if (!p.car || (p.car.condition ?? 100) >= 30) return;
+      smokeClock -= dt;
+      if (smokeClock > 0) return;
+      smokeClock = 0.25;
+      particles.burst(p.car.x, 1.5, p.car.z, 'smoke', 3);
+    },
+    () => syncPedFigures(pedFigures, state.peds),
+    (p, dt) => syncPickups(pickupFigures, state.pickups, state.time, dt),
+    (p, dt) => syncBeacon(beacon, diamond, state, dt),
+    (p, dt) => syncHeli(heli, heli.userData.pool, state),
+    () => syncWaterfront(scene, state.time),
+  ];
+
   return {
     scene,
     camera,
@@ -446,21 +466,7 @@ export function createRenderer(canvas, state) {
         if (fx.t < 0.05) particles.burst(fx.x, fx.y, fx.z, fx.kind, fx.kind === 'explosion' ? 40 : 18);
       }
       particles.advance(dt);
-      syncPlayerFigure(playerFigure, p);
-      syncCarFigures(scene, carFigures, state.cars, dt);
-      // Wrecked player car smokes.
-      if (p.car && (p.car.condition ?? 100) < 30) {
-        smokeClock -= dt;
-        if (smokeClock <= 0) {
-          smokeClock = 0.25;
-          particles.burst(p.car.x, 1.5, p.car.z, 'smoke', 3);
-        }
-      }
-      syncPedFigures(pedFigures, state.peds);
-      syncPickups(pickupFigures, state.pickups, state.time, dt);
-      syncBeacon(beacon, diamond, state, dt);
-      syncHeli(heli, heli.userData.pool, state);
-      syncWaterfront(scene, state.time);
+      for (const sync of SYNC_STEPS) sync(p, dt);
       // Ocean shimmer and drifting clouds.
       const ocean = scene.getObjectByName('ocean');
       if (ocean) ocean.position.y = -0.4 + Math.sin(state.time * 0.5) * 0.1;

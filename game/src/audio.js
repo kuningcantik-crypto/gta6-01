@@ -94,6 +94,39 @@ export function createAudio() {
     gain.connect(ac.destination);
     src.start();
   }
+  // One-shot effects, as data: each recipe is a list of steps, and each
+  // step names its player (blip or noise), the delay in milliseconds before
+  // it fires, and the arguments. One player function runs them all.
+  const SFX = {
+    shot: [{fn: 'noise', at: 0, args: [0.12, 0.3]}],
+    punch: [
+      {fn: 'noise', at: 0, args: [0.08, 0.2]},
+      {fn: 'blip', at: 0, args: [120, 0.08, 'square', 0.1]},
+    ],
+    pickup: [
+      {fn: 'blip', at: 0, args: [880, 0.12, 'sine', 0.18]},
+      {fn: 'blip', at: 90, args: [1320, 0.18, 'sine', 0.15]},
+    ],
+    mission: [
+      {fn: 'blip', at: 0, args: [523, 0.25, 'triangle', 0.16]},
+      {fn: 'blip', at: 110, args: [659, 0.25, 'triangle', 0.16]},
+      {fn: 'blip', at: 220, args: [784, 0.25, 'triangle', 0.16]},
+    ],
+    crash: [{fn: 'noise', at: 0, args: [0.25, 0.25]}],
+    click: [{fn: 'blip', at: 0, args: [600, 0.05, 'square', 0.08]}],
+  };
+  function playStep(step) {
+    if (step.fn === 'noise') noise(...step.args);
+    else blip(...step.args);
+  }
+  function playSfx(recipe) {
+    for (const step of recipe) {
+      if (step.at > 0) setTimeout(() => playStep(step), step.at);
+      else playStep(step);
+    }
+  }
+  const sfx = {};
+  for (const [name, recipe] of Object.entries(SFX)) sfx[name] = () => playSfx(recipe);
   return {
     unlock,
     setRadio(station) {
@@ -142,25 +175,6 @@ export function createAudio() {
         sirenGain = null;
       }
     },
-    shot() {
-      noise(0.12, 0.3);
-    },
-    punch() {
-      noise(0.08, 0.2);
-      blip(120, 0.08, 'square', 0.1);
-    },
-    pickup() {
-      blip(880, 0.12, 'sine', 0.18);
-      setTimeout(() => blip(1320, 0.18, 'sine', 0.15), 90);
-    },
-    mission() {
-      [523, 659, 784].forEach((f, i) => setTimeout(() => blip(f, 0.25, 'triangle', 0.16), i * 110));
-    },
-    crash() {
-      noise(0.25, 0.25);
-    },
-    click() {
-      blip(600, 0.05, 'square', 0.08);
-    },
+    ...sfx,
   };
 }

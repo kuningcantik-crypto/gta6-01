@@ -13,16 +13,16 @@ export function createTouchControls(controls, callbacks) {
   let joyPointer = null;
   let joyVec = {x: 0, y: 0};
 
+  // Stick directions, as data: each one names the held action and the test
+  // on the stick vector that turns it on. The dead zone is 0.18.
+  const STICK_DIRECTIONS = [
+    ['up', (v) => v.y < -0.18],
+    ['down', (v) => v.y > 0.18],
+    ['left', (v) => v.x < -0.18],
+    ['right', (v) => v.x > 0.18],
+  ];
   function applyJoystick() {
-    const dead = 0.18;
-    const up = joyVec.y < -dead;
-    const down = joyVec.y > dead;
-    const left = joyVec.x < -dead;
-    const right = joyVec.x > dead;
-    controls.setHeld('up', up);
-    controls.setHeld('down', down);
-    controls.setHeld('left', left);
-    controls.setHeld('right', right);
+    for (const [action, test] of STICK_DIRECTIONS) controls.setHeld(action, test(joyVec));
     // Pushing the stick to the edge on foot also means "run".
     controls.setHeld('run', Math.hypot(joyVec.x, joyVec.y) > 0.85);
     if (stick) stick.style.transform = `translate(${joyVec.x * 32}px, ${joyVec.y * 32}px)`;
@@ -63,36 +63,37 @@ export function createTouchControls(controls, callbacks) {
     joystick.addEventListener('pointercancel', joyEnd);
   }
 
-  // Hold-to-drive buttons set a held action; tap buttons fire one press.
-  function bindHold(id, action) {
+  // The touch buttons, as data: [element id, kind, action]. Hold buttons
+  // keep a held action set while the finger is down; tap buttons fire one
+  // press. 'camera' is the one tap that is a callback, not an input action.
+  const TOUCH_BUTTONS = [
+    ['btn-gas', 'hold', 'up'],
+    ['btn-brake', 'hold', 'down'],
+    ['btn-act', 'tap', 'enter'],
+    ['btn-wpn', 'tap', 'cycleWeapon'],
+    ['btn-cam', 'tap', 'camera'],
+    ['btn-msn', 'tap', 'missions'],
+  ];
+  for (const [id, kind, action] of TOUCH_BUTTONS) {
     const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('pointerdown', (event) => {
-      controls.setHeld(action, true);
-      event.preventDefault();
-    });
-    const release = () => {
-      controls.setHeld(action, false);
-    };
-    el.addEventListener('pointerup', release);
-    el.addEventListener('pointercancel', release);
-    el.addEventListener('pointerleave', release);
+    if (!el) continue;
+    if (kind === 'hold') {
+      el.addEventListener('pointerdown', (event) => {
+        controls.setHeld(action, true);
+        event.preventDefault();
+      });
+      const release = () => controls.setHeld(action, false);
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', release);
+      el.addEventListener('pointerleave', release);
+    } else {
+      el.addEventListener('pointerdown', (event) => {
+        if (action === 'camera') callbacks.onCamera();
+        else controls.press(action);
+        event.preventDefault();
+      });
+    }
   }
-  function bindTap(id, fn) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('pointerdown', (event) => {
-      fn();
-      event.preventDefault();
-    });
-  }
-
-  bindHold('btn-gas', 'up');
-  bindHold('btn-brake', 'down');
-  bindTap('btn-act', () => controls.press('enter'));
-  bindTap('btn-wpn', () => controls.press('cycleWeapon'));
-  bindTap('btn-cam', () => callbacks.onCamera());
-  bindTap('btn-msn', () => controls.press('missions'));
 
   let shown = false;
   window.addEventListener('touchstart', () => {

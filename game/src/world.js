@@ -124,6 +124,7 @@ export function createWorld(seed) {
     garageOpen: false,
     missionsOpen: false,
     stats: newStats(),
+    tipsShown: {},
   };
   spawnParkedCars(state, rng);
   spawnTraffic(state, rng);
@@ -145,6 +146,7 @@ export function addWanted(state, stars, audio) {
   const d = districtAt(rico.x, rico.z).name;
   state.districtHeat[d] = Math.min(100, (state.districtHeat[d] || 0) + stars * 8);
   if (rico.wanted > before && audio) audio.siren(true);
+  if (before === 0 && rico.wanted > 0) maybeTip(state, 'wanted');
 }
 
 // State mutations go through these helpers, so the economy, the event
@@ -176,6 +178,23 @@ function repairCar(car) {
   car.condition = 100;
 }
 
+// First-time street tips: each one shows once per game, the first time its
+// situation comes up, so a new player learns the ropes without a tutorial
+// screen getting in the way.
+const TIPS = [
+  {key: 'car', text: 'Cars are faster than feet — but stealing one in front of a cop is a crime.'},
+  {key: 'wanted', text: 'Wanted! Break line of sight and the stars fade. Plates (Z) drop one star.'},
+  {key: 'weapon', text: 'New guns live in slots 1-7. Q cycles the ones you own.'},
+  {key: 'health', text: 'Health is low — find a green cross pickup, or visit the hospital.'},
+  {key: 'garage', text: 'Safehouse garage. Press G near here to tune, armour and repair the ride.'},
+];
+function maybeTip(state, key) {
+  const tip = TIPS.find((t) => t.key === key);
+  if (!tip || state.tipsShown[key]) return;
+  state.tipsShown[key] = true;
+  pushMessage(state, 'TIP — ' + tip.text);
+}
+
 export function currentWeapon(state) {
   return state.player.weapons[state.player.weaponIndex];
 }
@@ -187,6 +206,7 @@ export function unlockWeapons(state) {
       w.ammo = w.startAmmo || 0;
       w.mag = w.mag;
       pushMessage(state, `Unlocked: ${w.name}! Press ${state.player.weapons.indexOf(w) + 1} to equip.`);
+      maybeTip(state, 'weapon');
     }
   }
 }
@@ -299,6 +319,7 @@ function climbIn(state, audio) {
   }
   car.kind = 'player';
   rico.car = car;
+  maybeTip(state, 'car');
   rico.onFoot = false;
   rico.x = car.x;
   rico.z = car.z;
@@ -480,6 +501,9 @@ function advanceStep(state, audio) {
 // One handler per step kind. Each gets the state, the audio handle, the
 // step itself, Rico, and a "within radius" test — and returns nothing;
 // advancing is the handler's job.
+// Which DJ line comes next, across all stations.
+let djCount = 0;
+
 const STEP_HANDLERS = {
   goto(state, audio, step, rico, within) {
     if (step.anyCar) {
@@ -635,7 +659,13 @@ function handleWeaponKeys(state, input, audio) {
   if (input.wasPressed('radio')) {
     rico.radioStation = (rico.radioStation + 1) % RADIO.length;
     if (audio) audio.setRadio(rico.radioStation);
-    pushMessage(state, `♪ ${RADIO[rico.radioStation].name} — ${RADIO[rico.radioStation].genre}`);
+    const station = RADIO[rico.radioStation];
+    pushMessage(state, `♪ ${station.name} — ${station.genre}`);
+    if (station.lines && station.lines.length) {
+      const line = station.lines[djCount % station.lines.length];
+      djCount += 1;
+      sayLine(state, line, station.dj, 'DJ');
+    }
   }
 }
 
@@ -756,6 +786,8 @@ function stepAmbient(state, dt, audio) {
       pushMessage(state, 'Cash found! +$25');
     }
   }
+  if (rico.health < 30 && rico.health > 0) maybeTip(state, 'health');
+  if (!state.garageOpen && Math.hypot(rico.x + 130, rico.z + 130) < 12) maybeTip(state, 'garage');
   if (rico.crimeTimer > WANTED.decayDelay) {
     rico.decayTimer += dt;
     if (rico.decayTimer >= WANTED.decayInterval && rico.wanted > 0) {
