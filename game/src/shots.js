@@ -5,7 +5,7 @@
 import { STEP } from './config.js';
 import { stepWorld } from './world.js';
 
-function normalizeAngle(a) {
+function foldAngle(a) {
   let out = a;
   while (out > Math.PI) out -= Math.PI * 2;
   while (out < -Math.PI) out += Math.PI * 2;
@@ -13,8 +13,9 @@ function normalizeAngle(a) {
 }
 
 // How far along the waypoint list Rico is, and whether the car has
-// wedged itself: no movement at low speed for two seconds means stuck.
-function trackWaypoints(car, waypoints, next, lastX, lastZ, stuckFor, dt) {
+// wedged itself: no movement at low speed for two seconds means stuck,
+// and a stuck car backs out instead of grinding against the wall.
+function trackProgress(car, waypoints, next, lastX, lastZ, stuckFor, dt) {
   const goal = waypoints[Math.min(next, waypoints.length - 1)];
   let advanced = next;
   if (Math.hypot(goal.x - car.x, goal.z - car.z) < 6 && next < waypoints.length - 1) advanced += 1;
@@ -23,9 +24,9 @@ function trackWaypoints(car, waypoints, next, lastX, lastZ, stuckFor, dt) {
   return {next: advanced, stuck};
 }
 
-function steerCar(car, goal, input) {
+function steerToward(car, goal, input) {
   const want = Math.atan2(goal.x - car.x, goal.z - car.z);
-  const diff = normalizeAngle(want - car.angle);
+  const diff = foldAngle(want - car.angle);
   // Only accelerate when roughly lined up and slow enough to turn, so
   // the car stays on the road instead of swinging onto the sidewalk
   // (and into pedestrians).
@@ -38,29 +39,28 @@ function steerCar(car, goal, input) {
 // Steer a car through a list of road waypoints the way a player would.
 // If the car gets wedged on a corner, it backs out and tries again.
 function autopilotDrive(world, input, waypoints, seconds) {
-  let next = 0;
-  let stuckFor = 0;
-  let reversingFor = 0;
-  let prevX = world.player.car ? world.player.car.x : 0;
-  let prevZ = world.player.car ? world.player.car.z : 0;
+  const drive = {next: 0, stuckFor: 0, reversingFor: 0, prevX: 0, prevZ: 0};
+  const car0 = world.player.car;
+  drive.prevX = car0 ? car0.x : 0;
+  drive.prevZ = car0 ? car0.z : 0;
   const total = Math.floor(seconds / STEP);
   for (let i = 0; i < total; i += 1) {
     const car = world.player.car;
     if (car === null || car === undefined) break;
-    const goal = waypoints[Math.min(next, waypoints.length - 1)];
-    const progress = trackWaypoints(car, waypoints, next, prevX, prevZ, stuckFor, STEP);
-    next = progress.next;
-    stuckFor = progress.stuck;
-    prevX = car.x;
-    prevZ = car.z;
-    if (stuckFor > 2 && reversingFor <= 0) reversingFor = 1.5;
+    const goal = waypoints[Math.min(drive.next, waypoints.length - 1)];
+    const progress = trackProgress(car, waypoints, drive.next, drive.prevX, drive.prevZ, drive.stuckFor, STEP);
+    drive.next = progress.next;
+    drive.stuckFor = progress.stuck;
+    drive.prevX = car.x;
+    drive.prevZ = car.z;
+    if (drive.stuckFor > 2 && drive.reversingFor <= 0) drive.reversingFor = 1.5;
     input.clear();
-    if (reversingFor > 0) {
-      reversingFor -= STEP;
+    if (drive.reversingFor > 0) {
+      drive.reversingFor -= STEP;
       input.set('down', true);
       input.set('left', true);
     } else {
-      steerCar(car, goal, input);
+      steerToward(car, goal, input);
     }
     stepWorld(world, input, STEP, null, car.angle);
     input.endFrame();

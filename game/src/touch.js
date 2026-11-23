@@ -7,9 +7,9 @@
 // Wired in main.js. The body gets the `touch` class on the first real
 // touch, which is what makes the touch UI appear on phones and stay
 // hidden on a desktop.
-const STICK_DEAD = 0.18;
-const STICK_RUN = 0.85;
-const KNOB_TRAVEL = 32;
+const DEAD_ZONE = 0.18;
+const RUN_EDGE = 0.85;
+const KNOB_RANGE = 32;
 
 export function createTouchControls(controls, callbacks) {
   const pad = document.getElementById('joystick');
@@ -19,67 +19,67 @@ export function createTouchControls(controls, callbacks) {
 
   // Which held action each stick direction turns on. The stick must clear
   // a dead zone before anything engages.
-  function applyStick() {
-    controls.setHeld('up', stickVec.y < -STICK_DEAD);
-    controls.setHeld('down', stickVec.y > STICK_DEAD);
-    controls.setHeld('left', stickVec.x < -STICK_DEAD);
-    controls.setHeld('right', stickVec.x > STICK_DEAD);
+  function syncStick() {
+    controls.setHeld('up', stickVec.y < -DEAD_ZONE);
+    controls.setHeld('down', stickVec.y > DEAD_ZONE);
+    controls.setHeld('left', stickVec.x < -DEAD_ZONE);
+    controls.setHeld('right', stickVec.x > DEAD_ZONE);
     // Shoving the stick to the edge on foot also means "run".
-    const magnitude = Math.hypot(stickVec.x, stickVec.y);
-    controls.setHeld('run', magnitude > STICK_RUN);
+    const reach = Math.hypot(stickVec.x, stickVec.y);
+    controls.setHeld('run', reach > RUN_EDGE);
     if (knob !== null) {
-      knob.style.transform = 'translate(' + stickVec.x * KNOB_TRAVEL + 'px, ' + stickVec.y * KNOB_TRAVEL + 'px)';
+      knob.style.transform = `translate(${stickVec.x * KNOB_RANGE}px, ${stickVec.y * KNOB_RANGE}px)`;
     }
   }
 
-  function moveStick(event) {
-    const box = pad.getBoundingClientRect();
-    const midX = box.left + box.width / 2;
-    const midY = box.top + box.height / 2;
-    let dx = (event.clientX - midX) / (box.width / 2);
-    let dy = (event.clientY - midY) / (box.height / 2);
+  function dragStick(event) {
+    const padBox = pad.getBoundingClientRect();
+    const midX = padBox.left + padBox.width / 2;
+    const midY = padBox.top + padBox.height / 2;
+    let dx = (event.clientX - midX) / (padBox.width / 2);
+    let dy = (event.clientY - midY) / (padBox.height / 2);
     const len = Math.hypot(dx, dy);
     if (len > 1) {
       dx /= len;
       dy /= len;
     }
     stickVec = {x: dx, y: dy};
-    applyStick();
+    syncStick();
   }
 
-  function dropStick(event) {
+  function liftStick(event) {
     if (activePointer !== event.pointerId) return;
     activePointer = null;
     stickVec = {x: 0, y: 0};
-    applyStick();
+    syncStick();
   }
 
   if (pad !== null) {
     pad.addEventListener('pointerdown', (event) => {
       activePointer = event.pointerId;
       pad.setPointerCapture(event.pointerId);
-      moveStick(event);
+      dragStick(event);
       event.preventDefault();
     });
     pad.addEventListener('pointermove', (event) => {
-      if (activePointer === event.pointerId) moveStick(event);
+      if (activePointer === event.pointerId) dragStick(event);
     });
-    pad.addEventListener('pointerup', dropStick);
-    pad.addEventListener('pointercancel', dropStick);
+    pad.addEventListener('pointerup', liftStick);
+    pad.addEventListener('pointercancel', liftStick);
   }
 
-  // The touch buttons: [element id, behaviour, action]. A hold button
-  // keeps a held action set while the finger is down; a tap button fires
-  // one press. 'camera' is the one tap that is a callback, not an action.
-  const BUTTONS = [
-    ['btn-gas', 'hold', 'up'],
-    ['btn-brake', 'hold', 'down'],
-    ['btn-act', 'tap', 'enter'],
-    ['btn-wpn', 'tap', 'cycleWeapon'],
-    ['btn-cam', 'tap', 'camera'],
-    ['btn-msn', 'tap', 'missions'],
+  // The touch buttons: id, behaviour, action. A hold button keeps a held
+  // action set while the finger is down; a tap button fires one press.
+  // 'camera' is the one tap that is a callback, not an action.
+  const BUTTON_SPECS = [
+    {id: 'btn-gas', kind: 'hold', action: 'up'},
+    {id: 'btn-brake', kind: 'hold', action: 'down'},
+    {id: 'btn-act', kind: 'tap', action: 'enter'},
+    {id: 'btn-wpn', kind: 'tap', action: 'cycleWeapon'},
+    {id: 'btn-cam', kind: 'tap', action: 'camera'},
+    {id: 'btn-msn', kind: 'tap', action: 'missions'},
   ];
-  function wireHold(button, action) {
+  function wireHoldButton(button, action) {
     button.addEventListener('pointerdown', (event) => {
       controls.setHeld(action, true);
       event.preventDefault();
@@ -89,19 +89,22 @@ export function createTouchControls(controls, callbacks) {
     button.addEventListener('pointercancel', letGo);
     button.addEventListener('pointerleave', letGo);
   }
-  function wireTap(button, action) {
-    button.addEventListener('pointerdown', (event) => {
+  function wireTapButton(button, action) {
+    // Tap buttons fire on CLICK, not pointerdown: a touch tap also
+    // produces a compatibility click a moment later, and if the first
+    // press opened a full-screen overlay (JOBS), that late click would
+    // land on the overlay's Close button and shut it again at once.
+    // Firing on the click itself means one tap is exactly one action.
+    button.addEventListener('click', () => {
       if (action === 'camera') callbacks.onCamera();
       else controls.press(action);
-      event.preventDefault();
     });
   }
-  for (let i = 0; i < BUTTONS.length; i += 1) {
-    const [id, behaviour, action] = BUTTONS[i];
-    const button = document.getElementById(id);
+  for (const spec of BUTTON_SPECS) {
+    const button = document.getElementById(spec.id);
     if (button === null) continue;
-    if (behaviour === 'hold') wireHold(button, action);
-    else wireTap(button, action);
+    if (spec.kind === 'hold') wireHoldButton(button, spec.action);
+    else wireTapButton(button, spec.action);
   }
 
   let touchSeen = false;

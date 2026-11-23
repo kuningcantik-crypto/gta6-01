@@ -7,16 +7,18 @@
 
 export const WEATHER_KINDS = ['clear', 'cloudy', 'rain', 'storm'];
 
-// Fase langit sepanjang hari: tiap fase mulai pada jam tertentu dan
-// bertahan sampai fase berikutnya dimulai. Jam 23 kembali cerah agar
-// malam larut tetap terang bulan.
-const DAY_PHASES = [
-  {start: 0, kind: 'clear'},
-  {start: 14, kind: 'cloudy'},
-  {start: 18, kind: 'rain'},
-  {start: 20, kind: 'storm'},
-  {start: 23, kind: 'clear'},
+// Fase langit sepanjang hari: [jam mulai, jenis]. Jam 23 kembali cerah
+// agar malam larut tetap terang bulan. Fase dipilih murni dari jam di
+// dalam game, jadi dua run dengan seed yang sama melihat langit yang
+// sama di jam yang sama.
+const PHASE_ROWS = [
+  [0, 'clear'],
+  [14, 'cloudy'],
+  [18, 'rain'],
+  [20, 'storm'],
+  [23, 'clear'],
 ];
+const DAY_PHASES = PHASE_ROWS.map(([start, kind]) => ({start, kind}));
 
 export function weatherForHour(hour) {
   let current = DAY_PHASES[0].kind;
@@ -42,13 +44,19 @@ export function createWeather() {
   };
 }
 
-const DIM_PER_KIND = {storm: 0.45, rain: 0.6, cloudy: 0.8, clear: 1};
+// Per jenis cuaca: [jenis, redup matahari, target hujan, label].
+const KIND_ROWS = [
+  ['clear', 1, 0, 'CLEAR'],
+  ['cloudy', 0.8, 0, 'CLOUDY'],
+  ['rain', 0.6, 0.65, 'RAIN'],
+  ['storm', 0.45, 1, 'STORM'],
+];
+const KIND_TABLE = Object.fromEntries(KIND_ROWS.map(([kind, dim, rain, label]) => [kind, {dim, rain, label}]));
 
 // Seberapa redup matahari untuk satu jenis cuaca. Renderer melakukan
 // lerp menuju nilai ini, jadi pergantian langit tidak pernah mendadak.
 export function skyDim(kind) {
-  const dim = DIM_PER_KIND[kind];
-  return dim === undefined ? 1 : dim;
+  return KIND_TABLE[kind] ? KIND_TABLE[kind].dim : 1;
 }
 
 function clamp01(v) {
@@ -57,12 +65,10 @@ function clamp01(v) {
   return v;
 }
 
-function driftToward(now, goal, dt) {
+function easeToward(now, goal, dt) {
   const step = goal > now ? dt / 4 : dt / 8;
   return now + Math.max(-step, Math.min(step, goal - now));
 }
-
-const RAIN_TARGET = {storm: 1, rain: 0.65, cloudy: 0, clear: 0};
 
 // Majukan cuaca sebesar dt detik pada jam tertentu. Mengembalikan true
 // saat jenis cuacanya berganti, supaya pemanggil bisa mengumumkannya
@@ -89,28 +95,27 @@ export function tickWeather(weather, dt, clockMinutes, rng) {
     weather.boltGlow = Math.max(0, weather.boltGlow - dt * 2.2);
   }
   // Lalu hujan: deras naik cepat, reda pelan.
-  const goal = RAIN_TARGET[weather.kind];
-  weather.rain = driftToward(weather.rain, goal, dt);
+  const goal = KIND_TABLE[weather.kind].rain;
+  weather.rain = easeToward(weather.rain, goal, dt);
   // Jalan basah ikut: cepat basah saat hujan, kering pelan setelahnya.
   const drying = goal > 0 ? dt / 20 : -dt / 40;
   weather.wetness = clamp01(weather.wetness + drying);
   return changed;
 }
 
-const LABEL_PER_KIND = {storm: 'STORM', rain: 'RAIN', cloudy: 'CLOUDY', clear: 'CLEAR'};
-
 export function weatherLabel(weather) {
-  return LABEL_PER_KIND[weather.kind] || 'CLEAR';
+  return KIND_TABLE[weather.kind] ? KIND_TABLE[weather.kind].label : 'CLEAR';
 }
 
 // Satu baris ticker radio saat langit berubah.
-const CHATTER_PER_KIND = {
-  storm: 'SBPD: "Storm over the bay — drive careful, Solmar."',
-  rain: 'SOLMAR WIRE — Rain moving in off the water.',
-  cloudy: 'SOLMAR WIRE — Clouds building over the plaza.',
-  clear: 'SOLMAR WIRE — Skies clearing over the bay.',
-};
+const CHATTER_ROWS = [
+  ['storm', 'SBPD: "Storm over the bay — drive careful, Solmar."'],
+  ['rain', 'SOLMAR WIRE — Rain moving in off the water.'],
+  ['cloudy', 'SOLMAR WIRE — Clouds building over the plaza.'],
+  ['clear', 'SOLMAR WIRE — Skies clearing over the bay.'],
+];
+const CHATTER = Object.fromEntries(CHATTER_ROWS);
 
 export function weatherChatter(kind) {
-  return CHATTER_PER_KIND[kind] || CHATTER_PER_KIND.clear;
+  return CHATTER[kind] || CHATTER.clear;
 }

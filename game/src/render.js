@@ -17,80 +17,100 @@ import { skyDim } from './weather.js';
 import { tramPoses } from './tram.js';
 
 const POOL_SIZE = 300;
+const RAIN_COUNT = 500;
+
+// Small mesh helpers: every builder below speaks in boxes, cylinders
+// and cones placed by [x, y, z] triples, so the scene reads as a parts
+// list instead of a wall of constructors.
+function lambert(color, extra = {}) {
+  return new THREE.MeshLambertMaterial({color, ...extra});
+}
+function basic(color, extra = {}) {
+  return new THREE.MeshBasicMaterial({color, ...extra});
+}
+function boxMesh(w, h, d, material, x = 0, y = 0, z = 0) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  mesh.position.set(x, y, z);
+  return mesh;
+}
+function place(mesh, x, y, z) {
+  mesh.position.set(x, y, z);
+  return mesh;
+}
 
 // --- particles -----------------------------------------------------------
 // One THREE.Points pool, reused for crashes, explosions and the
 // mission-complete burst. Nothing is allocated per frame.
-function buildParticlePool(scene) {
+const PARTICLE_PALETTES = Object.fromEntries([
+  ['crash', [0xffb347, 0xd9d9d9, 0xff7a2b]],
+  ['explosion', [0xff5a2b, 0xffd76e, 0x333333]],
+  ['gold', [0xffd76e, 0xfff2b0, 0x7dff9a]],
+  ['smoke', [0x777777, 0x999999]],
+]);
+
+function makePointPool(scene) {
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(POOL_SIZE * 3);
   const col = new Float32Array(POOL_SIZE * 3);
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const points = new THREE.Points(
-    geo,
-    new THREE.PointsMaterial({size: 0.9, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false}),
-  );
+  const points = new THREE.Points(geo, new THREE.PointsMaterial({
+    size: 0.9, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false,
+  }));
   points.frustumCulled = false;
   scene.add(points);
   const vel = new Float32Array(POOL_SIZE * 3);
   const life = new Float32Array(POOL_SIZE);
   let cursor = 0;
-  const PALETTES = {
-    crash: [0xffb347, 0xd9d9d9, 0xff7a2b],
-    explosion: [0xff5a2b, 0xffd76e, 0x333333],
-    gold: [0xffd76e, 0xfff2b0, 0x7dff9a],
-    smoke: [0x777777, 0x999999],
-  };
-  return {
-    burst(x, y, z, kind, count) {
-      const colors = PALETTES[kind] || [0xffffff];
-      for (let n = 0; n < count; n += 1) {
-        const i = cursor;
-        cursor = (cursor + 1) % POOL_SIZE;
-        pos[i * 3] = x;
-        pos[i * 3 + 1] = y;
-        pos[i * 3 + 2] = z;
-        const heading = Math.random() * Math.PI * 2;
-        const speed = kind === 'smoke' ? 1 + Math.random() : 3 + Math.random() * 7;
-        vel[i * 3] = Math.cos(heading) * speed;
-        vel[i * 3 + 1] = 2 + Math.random() * (kind === 'smoke' ? 2 : 6);
-        vel[i * 3 + 2] = Math.sin(heading) * speed;
-        life[i] = 0.6 + Math.random() * 0.7;
-        const c = new THREE.Color(colors[Math.floor(Math.random() * colors.length)]);
-        col[i * 3] = c.r;
-        col[i * 3 + 1] = c.g;
-        col[i * 3 + 2] = c.b;
+
+  function spawn(x, y, z, kind, count) {
+    const colors = PARTICLE_PALETTES[kind] || [0xffffff];
+    for (let n = 0; n < count; n += 1) {
+      const i = cursor;
+      cursor = (cursor + 1) % POOL_SIZE;
+      pos[i * 3] = x;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = z;
+      const heading = Math.random() * Math.PI * 2;
+      const speed = kind === 'smoke' ? 1 + Math.random() : 3 + Math.random() * 7;
+      vel[i * 3] = Math.cos(heading) * speed;
+      vel[i * 3 + 1] = 2 + Math.random() * (kind === 'smoke' ? 2 : 6);
+      vel[i * 3 + 2] = Math.sin(heading) * speed;
+      life[i] = 0.6 + Math.random() * 0.7;
+      const c = new THREE.Color(colors[Math.floor(Math.random() * colors.length)]);
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+    }
+    geo.attributes.position.needsUpdate = true;
+    geo.attributes.color.needsUpdate = true;
+  }
+
+  function tick(dt) {
+    let alive = false;
+    for (let i = 0; i < POOL_SIZE; i += 1) {
+      if (life[i] <= 0) continue;
+      alive = true;
+      life[i] -= dt;
+      pos[i * 3] += vel[i * 3] * dt;
+      pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
+      pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
+      vel[i * 3 + 1] -= 9 * dt;
+      if (pos[i * 3 + 1] < 0.1) {
+        pos[i * 3 + 1] = 0.1;
+        vel[i * 3 + 1] = 0;
       }
-      geo.attributes.position.needsUpdate = true;
-      geo.attributes.color.needsUpdate = true;
-    },
-    advance(dt) {
-      let alive = false;
-      for (let i = 0; i < POOL_SIZE; i += 1) {
-        if (life[i] <= 0) continue;
-        alive = true;
-        life[i] -= dt;
-        pos[i * 3] += vel[i * 3] * dt;
-        pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
-        pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
-        vel[i * 3 + 1] -= 9 * dt;
-        if (pos[i * 3 + 1] < 0.1) {
-          pos[i * 3 + 1] = 0.1;
-          vel[i * 3 + 1] = 0;
-        }
-        if (life[i] <= 0) pos[i * 3 + 1] = -100;
-      }
-      if (alive) geo.attributes.position.needsUpdate = true;
-    },
-  };
+      if (life[i] <= 0) pos[i * 3 + 1] = -100;
+    }
+    if (alive) geo.attributes.position.needsUpdate = true;
+  }
+  return {burst: spawn, advance: tick};
 }
 
 // --- rain ----------------------------------------------------------------
 // A sheet of falling drops that follows the player, fading in with the
 // weather's rain level. One Points cloud, recycled in place.
-const RAIN_COUNT = 500;
-function buildRainPool(scene) {
+function makeRainSheet(scene) {
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(RAIN_COUNT * 3);
   for (let i = 0; i < RAIN_COUNT; i += 1) {
@@ -99,7 +119,9 @@ function buildRainPool(scene) {
     pos[i * 3 + 2] = (Math.random() - 0.5) * 70;
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const material = new THREE.PointsMaterial({size: 0.18, color: 0x9ab8d9, transparent: true, opacity: 0, depthWrite: false});
+  const material = new THREE.PointsMaterial({
+    size: 0.18, color: 0x9ab8d9, transparent: true, opacity: 0, depthWrite: false,
+  });
   const points = new THREE.Points(geo, material);
   points.frustumCulled = false;
   points.visible = false;
@@ -130,32 +152,20 @@ function buildRainPool(scene) {
 // --- trams ---------------------------------------------------------------
 // A tram car: a long cream-and-teal box with a window band and a roof
 // rail, riding the loop the tram module defines.
+// [w, h, d, color, x, y, z, shadow?]
+const TRAM_PARTS = [
+  [2.6, 2.4, 10, 0xf2e3c6, 0, 1.5, 0, true],
+  [2.7, 0.8, 9.2, 0x14586e, 0, 1.9, 0, false],
+  [2.4, 0.25, 9.6, 0x2b6fd9, 0, 2.85, 0, false],
+];
 function buildTramMesh(line) {
   const car = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(2.6, 2.4, 10),
-    new THREE.MeshLambertMaterial({color: 0xf2e3c6}),
-  );
-  body.position.y = 1.5;
-  body.castShadow = true;
-  car.add(body);
-  const band = new THREE.Mesh(
-    new THREE.BoxGeometry(2.7, 0.8, 9.2),
-    new THREE.MeshLambertMaterial({color: 0x14586e}),
-  );
-  band.position.y = 1.9;
-  car.add(band);
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4, 0.25, 9.6),
-    new THREE.MeshLambertMaterial({color: 0x2b6fd9}),
-  );
-  roof.position.y = 2.85;
-  car.add(roof);
-  const sign = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 0.4, 0.1),
-    new THREE.MeshBasicMaterial({color: 0xffd76e}),
-  );
-  sign.position.set(0, 2.6, 5.05);
+  for (const [w, h, d, color, x, y, z, shadow] of TRAM_PARTS) {
+    const part = boxMesh(w, h, d, lambert(color), x, y, z);
+    part.castShadow = shadow;
+    car.add(part);
+  }
+  const sign = boxMesh(1.2, 0.4, 0.1, basic(0xffd76e), 0, 2.6, 5.05);
   car.add(sign);
   car.userData.line = line;
   return car;
@@ -163,25 +173,25 @@ function buildTramMesh(line) {
 
 function syncTrams(figures, tram) {
   const poses = tramPoses(tram);
-  poses.forEach((pose, i) => {
+  for (let i = 0; i < poses.length; i += 1) {
     const mesh = figures[i];
-    if (!mesh) return;
-    mesh.position.set(pose.x, 0, pose.z);
-    mesh.rotation.y = pose.angle;
+    if (!mesh) continue;
+    mesh.position.set(poses[i].x, 0, poses[i].z);
+    mesh.rotation.y = poses[i].angle;
     mesh.visible = true;
-  });
+  }
 }
 
 // Hidden stashes glow green and bob, like pickups but smaller and
 // greener — the hunt is a different game from the health crosses.
 function syncStashes(figures, stashes, time, dt) {
-  stashes.list.forEach((stash, i) => {
+  for (let i = 0; i < stashes.list.length; i += 1) {
     const mesh = figures[i];
-    if (!mesh) return;
-    mesh.visible = !stash.found;
+    if (!mesh) continue;
+    mesh.visible = !stashes.list[i].found;
     mesh.rotation.y += dt * 1.5;
     mesh.position.y = 0.6 + Math.sin(time * 2 + i * 1.7) * 0.12;
-  });
+  }
 }
 
 // --- per-frame sync ------------------------------------------------------
@@ -231,30 +241,31 @@ function syncCars(scene, figures, cars, dt) {
 }
 
 function syncPeds(figures, peds) {
-  peds.forEach((ped, i) => {
+  for (let i = 0; i < peds.length; i += 1) {
+    const ped = peds[i];
     const mesh = figures[i];
     mesh.position.set(ped.x, 0, ped.z);
     mesh.rotation.y = ped.angle;
     if (ped.state === 'down') {
       mesh.rotation.x = Math.PI / 2;
       mesh.position.y = 0.3;
-      return;
+      continue;
     }
     mesh.rotation.x = 0;
     mesh.position.y = 0;
     const swing = Math.sin(ped.walkPhase) * 0.5;
     mesh.userData.legL.rotation.x = swing;
     mesh.userData.legR.rotation.x = -swing;
-  });
+  }
 }
 
 function syncPickups(figures, pickups, time, dt) {
-  pickups.forEach((pickup, i) => {
+  for (let i = 0; i < pickups.length; i += 1) {
     const mesh = figures[i];
-    mesh.visible = !pickup.taken;
+    mesh.visible = !pickups[i].taken;
     mesh.rotation.y += dt * 2;
     mesh.position.y = 0.8 + Math.sin(time * 2 + i) * 0.15;
-  });
+  }
 }
 
 function syncBeacon(beacon, diamond, state, dt) {
@@ -277,11 +288,11 @@ function syncWaterfront(scene, time) {
     rotor.rotation.z = time * 0.12;
     for (const cabin of rotor.userData.cabins || []) cabin.rotation.z = -rotor.rotation.z;
   }
+  const span = 260;
   for (let i = 0; i < 3; i += 1) {
     const boat = scene.getObjectByName('boat-' + i);
     if (!boat) continue;
     const {lane, speed, phase} = boat.userData;
-    const span = 260;
     const x = (((time * speed + phase) % span) + span) % span - span / 2;
     boat.position.x = x;
     boat.position.z = lane;
@@ -330,17 +341,25 @@ function placeCamera(camera, state, yaw, mode, fixed) {
 }
 
 // Dusk sky dome: a gradient shell, so the horizon is never a flat colour.
+const SKY_STOPS = [
+  [0.0, '#16294f'],
+  [0.35, '#5a3a6e'],
+  [0.62, '#c65a4e'],
+  [0.8, '#ff9e5e'],
+  [1.0, '#ffd9a0'],
+];
+// [radius, color, opacity] — the glow, then the disc itself.
+const SUN_DISCS = [
+  [70, 0xffb347, 0.22],
+  [26, 0xffe9b0, 1],
+];
 function buildSkyDome(scene) {
   const skyCanvas = document.createElement('canvas');
   skyCanvas.width = 4;
   skyCanvas.height = 256;
   const skyCtx = skyCanvas.getContext('2d');
   const gradient = skyCtx.createLinearGradient(0, 0, 0, 256);
-  gradient.addColorStop(0.0, '#16294f');
-  gradient.addColorStop(0.35, '#5a3a6e');
-  gradient.addColorStop(0.62, '#c65a4e');
-  gradient.addColorStop(0.8, '#ff9e5e');
-  gradient.addColorStop(1.0, '#ffd9a0');
+  for (const [stop, color] of SKY_STOPS) gradient.addColorStop(stop, color);
   skyCtx.fillStyle = gradient;
   skyCtx.fillRect(0, 0, 4, 256);
   const skyTex = new THREE.CanvasTexture(skyCanvas);
@@ -351,7 +370,7 @@ function buildSkyDome(scene) {
   );
   scene.add(dome);
   // Low sun disc + glow in the direction the light comes from.
-  for (const [radius, color, opacity] of [[70, 0xffb347, 0.22], [26, 0xffe9b0, 1]]) {
+  for (const [radius, color, opacity] of SUN_DISCS) {
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(radius, 24),
       new THREE.MeshBasicMaterial({color, transparent: opacity < 1, opacity, fog: false, depthWrite: false}),
@@ -366,29 +385,13 @@ function buildSkyDome(scene) {
 // that tracks the player on the ground. Shown when wanted >= 3.
 function buildHeli() {
   const heli = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 1.4, 4.2),
-    new THREE.MeshLambertMaterial({color: 0x1c2b4a}),
-  );
+  const navy = lambert(0x1c2b4a);
+  const body = boxMesh(2.2, 1.4, 4.2, navy);
   body.castShadow = true;
   heli.add(body);
-  const tail = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 0.5, 3.4),
-    new THREE.MeshLambertMaterial({color: 0x1c2b4a}),
-  );
-  tail.position.set(0, 0.2, -3.4);
-  heli.add(tail);
-  const skid = new THREE.Mesh(
-    new THREE.BoxGeometry(2.0, 0.15, 3.0),
-    new THREE.MeshLambertMaterial({color: 0x222222}),
-  );
-  skid.position.y = -0.9;
-  heli.add(skid);
-  const rotorA = new THREE.Mesh(
-    new THREE.BoxGeometry(9, 0.08, 0.4),
-    new THREE.MeshLambertMaterial({color: 0x111111}),
-  );
-  rotorA.position.y = 1.0;
+  heli.add(boxMesh(0.5, 0.5, 3.4, navy, 0, 0.2, -3.4));
+  heli.add(boxMesh(2.0, 0.15, 3.0, lambert(0x222222), 0, -0.9, 0));
+  const rotorA = boxMesh(9, 0.08, 0.4, lambert(0x111111), 0, 1.0, 0);
   heli.add(rotorA);
   const rotorB = rotorA.clone();
   rotorB.rotation.y = Math.PI / 2;
@@ -493,11 +496,7 @@ export function createRenderer(canvas, state) {
     return mesh;
   });
   const pickupFigures = state.pickups.map((pickup) => {
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.7, 0.5, 0.7),
-      new THREE.MeshLambertMaterial({color: 0xffd76e, emissive: 0x664400}),
-    );
-    mesh.position.set(pickup.x, 0.8, pickup.z);
+    const mesh = boxMesh(0.7, 0.5, 0.7, lambert(0xffd76e, {emissive: 0x664400}), pickup.x, 0.8, pickup.z);
     scene.add(mesh);
     return mesh;
   });
@@ -505,19 +504,15 @@ export function createRenderer(canvas, state) {
   const {beacon, diamond} = buildBeacon(scene);
   const heli = buildHeli();
   scene.add(heli);
-  const particles = buildParticlePool(scene);
-  const rain = buildRainPool(scene);
+  const particles = makePointPool(scene);
+  const rain = makeRainSheet(scene);
   const tramFigures = state.tram.cars.map((car) => {
     const mesh = buildTramMesh(car.line);
     scene.add(mesh);
     return mesh;
   });
   const stashFigures = state.stashes.list.map((stash) => {
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.8, 0.5, 0.5),
-      new THREE.MeshLambertMaterial({color: 0x7dff9a, emissive: 0x1a5a2a}),
-    );
-    mesh.position.set(stash.x, 0.6, stash.z);
+    const mesh = boxMesh(0.8, 0.5, 0.5, lambert(0x7dff9a, {emissive: 0x1a5a2a}), stash.x, 0.6, stash.z);
     scene.add(mesh);
     return mesh;
   });
@@ -568,6 +563,61 @@ export function createRenderer(canvas, state) {
     () => { if (beamPivot) beamPivot.rotation.y = state.time * 0.5; },
   ];
 
+  function applyLowQuality() {
+    renderer.shadowMap.enabled = false;
+    // Dynamic resolution: render at 75% and upscale — the standard
+    // low-end lever, and the one that actually moves SwiftShader FPS.
+    renderer.setPixelRatio(0.75);
+    renderer.toneMapping = THREE.NoToneMapping;
+    scene.traverse((o) => {
+      if (o.material) o.material.needsUpdate = true;
+    });
+  }
+
+  function fireMuzzleFlash() {
+    muzzleLight.position.set(state.player.x, 2, state.player.z);
+    muzzleLight.intensity = 60;
+  }
+
+  // Paint one frame. `cameraYaw` is the orbit angle; `mode` is 'follow',
+  // 'aerial' (title screen) or 'fixed' (screenshot staging).
+  function paintFrame(dt, cameraYaw, mode, fixedCamera) {
+    const p = state.player;
+    // Fresh world effects burst once, on the frame they appear: a big
+    // burst for explosions, a smaller one for anything else. The world
+    // clears the list itself; the renderer only paints it.
+    for (const fx of state.fx) {
+      if (fx.t < 0.05) particles.burst(fx.x, fx.y, fx.z, fx.kind, fx.kind === 'explosion' ? 40 : 18);
+    }
+    particles.advance(dt);
+    for (const sync of SYNC_STEPS) sync(p, dt);
+    // Ocean shimmer and drifting clouds.
+    const ocean = scene.getObjectByName('ocean');
+    if (ocean) ocean.position.y = -0.4 + Math.sin(state.time * 0.5) * 0.1;
+    for (const cloud of city.clouds) {
+      cloud.position.x += dt * 1.2;
+      if (cloud.position.x > 260) cloud.position.x = -260;
+    }
+    if (muzzleLight.intensity > 0) muzzleLight.intensity = Math.max(0, muzzleLight.intensity - dt * 400);
+    // Weather on screen: the sun dims under cloud, rain falls around
+    // the player, and a lightning bolt flashes the whole frame.
+    const dim = skyDim(state.weather.kind);
+    sun.intensity = 3.0 * dim;
+    rain.setRain(state.weather.rain, p.x, p.z, dt);
+    if (state.weather.boltGlow > 0) {
+      muzzleLight.position.set(p.x, 30, p.z);
+      muzzleLight.intensity = Math.max(muzzleLight.intensity, state.weather.boltGlow * 140);
+    }
+
+    placeCamera(camera, state, cameraYaw, mode, fixedCamera);
+    // Shadow frustum follows the player (or the camera target on title).
+    const focusX = mode === 'aerial' ? 0 : p.x;
+    const focusZ = mode === 'aerial' ? 40 : p.z;
+    sun.position.set(focusX + 90, 90, focusZ - 60);
+    sun.target.position.set(focusX, 0, focusZ);
+    renderer.render(scene, camera);
+  }
+
   return {
     scene,
     camera,
@@ -577,57 +627,11 @@ export function createRenderer(canvas, state) {
     // (shadows, pixel ratio, tone mapping). Antialiasing is fixed at
     // context creation, so it is only a startup knob (?aa=0 / ?quality=low).
     setQuality(level) {
-      if (level === 'low') {
-        renderer.shadowMap.enabled = false;
-        // Dynamic resolution: render at 75% and upscale — the standard
-        // low-end lever, and the one that actually moves SwiftShader FPS.
-        renderer.setPixelRatio(0.75);
-        renderer.toneMapping = THREE.NoToneMapping;
-        scene.traverse((o) => {
-          if (o.material) o.material.needsUpdate = true;
-        });
-      }
+      if (level === 'low') applyLowQuality();
       return level;
     },
     quality: () => ({aa: aaOn, shadows: renderer.shadowMap.enabled, toneMapping: renderer.toneMapping !== THREE.NoToneMapping}),
-    flash() {
-      muzzleLight.position.set(state.player.x, 2, state.player.z);
-      muzzleLight.intensity = 60;
-    },
-    // Paint one frame. `cameraYaw` is the orbit angle; `mode` is 'follow',
-    // 'aerial' (title screen) or 'fixed' (screenshot staging).
-    render(dt, cameraYaw, mode, fixedCamera) {
-      const p = state.player;
-      for (const fx of state.fx) {
-        if (fx.t < 0.05) particles.burst(fx.x, fx.y, fx.z, fx.kind, fx.kind === 'explosion' ? 40 : 18);
-      }
-      particles.advance(dt);
-      for (const sync of SYNC_STEPS) sync(p, dt);
-      // Ocean shimmer and drifting clouds.
-      const ocean = scene.getObjectByName('ocean');
-      if (ocean) ocean.position.y = -0.4 + Math.sin(state.time * 0.5) * 0.1;
-      for (const cloud of city.clouds) {
-        cloud.position.x += dt * 1.2;
-        if (cloud.position.x > 260) cloud.position.x = -260;
-      }
-      if (muzzleLight.intensity > 0) muzzleLight.intensity = Math.max(0, muzzleLight.intensity - dt * 400);
-      // Weather on screen: the sun dims under cloud, rain falls around
-      // the player, and a lightning bolt flashes the whole frame.
-      const dim = skyDim(state.weather.kind);
-      sun.intensity = 3.0 * dim;
-      rain.setRain(state.weather.rain, p.x, p.z, dt);
-      if (state.weather.boltGlow > 0) {
-        muzzleLight.position.set(p.x, 30, p.z);
-        muzzleLight.intensity = Math.max(muzzleLight.intensity, state.weather.boltGlow * 140);
-      }
-
-      placeCamera(camera, state, cameraYaw, mode, fixedCamera);
-      // Shadow frustum follows the player (or the camera target on title).
-      const focusX = mode === 'aerial' ? 0 : p.x;
-      const focusZ = mode === 'aerial' ? 40 : p.z;
-      sun.position.set(focusX + 90, 90, focusZ - 60);
-      sun.target.position.set(focusX, 0, focusZ);
-      renderer.render(scene, camera);
-    },
+    flash: fireMuzzleFlash,
+    render: paintFrame,
   };
 }

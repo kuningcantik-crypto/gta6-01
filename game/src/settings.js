@@ -5,31 +5,27 @@
 
 export const SETTINGS_KEY = 'solmar-settings-v1';
 
-export const DEFAULT_SETTINGS = {
-  // 'auto' drops to the light renderer when the frame rate sags.
-  quality: 'auto',
-  // 0..1, scales every sound the audio module makes.
-  volume: 0.8,
-  // Flip the camera orbit direction.
-  invertCamera: false,
-  // Show the frames-per-second counter in the HUD corner.
-  showFps: false,
-  // Rain and lightning on or off; off keeps the sky clear all day.
-  weatherOn: true,
-  // Keep the minimap on screen, or hide it for a cleaner view.
-  showMinimap: true,
-};
+// [key, default] — the order is the panel's order.
+const FIELD_ROWS = [
+  ['quality', 'auto'],
+  ['volume', 0.8],
+  ['invertCamera', false],
+  ['showFps', false],
+  ['weatherOn', true],
+  ['showMinimap', true],
+];
+export const DEFAULT_SETTINGS = Object.fromEntries(FIELD_ROWS);
 
-function isRecord(value) {
+function looksLikeRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function mergeIntoDefaults(saved) {
+function fillDefaults(saved) {
   const out = {...DEFAULT_SETTINGS};
-  if (!isRecord(saved)) return out;
-  for (const key of Object.keys(DEFAULT_SETTINGS)) {
+  if (!looksLikeRecord(saved)) return out;
+  for (const [key, fallback] of FIELD_ROWS) {
     const incoming = saved[key];
-    if (incoming !== undefined && typeof incoming === typeof DEFAULT_SETTINGS[key]) out[key] = incoming;
+    if (incoming !== undefined && typeof incoming === typeof fallback) out[key] = incoming;
   }
   return out;
 }
@@ -38,8 +34,8 @@ export function loadSettings() {
   try {
     const raw = window.localStorage.getItem(SETTINGS_KEY);
     if (!raw) return {...DEFAULT_SETTINGS};
-    return mergeIntoDefaults(JSON.parse(raw));
-  } catch (err) {
+    return fillDefaults(JSON.parse(raw));
+  } catch {
     // A corrupt settings blob is not worth a crash: play with defaults.
     return {...DEFAULT_SETTINGS};
   }
@@ -48,13 +44,15 @@ export function loadSettings() {
 export function saveSettings(settings) {
   try {
     window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch (err) {
+  } catch {
     // Private mode or a full store: settings just don't persist.
   }
 }
 
 // One setting at a time, validated against the default's type so a
-// stray value can never slip in from a hand-edited store.
+// stray value can never slip in from a hand-edited store. An unknown key
+// or a wrong-typed value leaves the settings object untouched and
+// returns it as-is — the caller can always use the return value.
 export function setSetting(settings, key, value) {
   if (!(key in DEFAULT_SETTINGS)) return settings;
   if (typeof value !== typeof DEFAULT_SETTINGS[key]) return settings;

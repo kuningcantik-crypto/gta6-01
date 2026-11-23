@@ -16,21 +16,25 @@ export const TRAM_LOOP_LENGTH = 8 * TRAM_LOOP_HALF;
 const SIDE = 2 * TRAM_LOOP_HALF;
 
 // Empat sisi loop, berlawanan arah jarum jam mulai dari sudut barat
-// daya: tiap sisi tahu titik awal, arah jalan, dan hadap gerbongnya.
-const LOOP_SIDES = [
-  {fromX: -TRAM_LOOP_HALF, fromZ: TRAM_LOOP_HALF, stepX: 1, stepZ: 0, heading: Math.PI / 2},
-  {fromX: TRAM_LOOP_HALF, fromZ: TRAM_LOOP_HALF, stepX: 0, stepZ: -1, heading: 0},
-  {fromX: TRAM_LOOP_HALF, fromZ: -TRAM_LOOP_HALF, stepX: -1, stepZ: 0, heading: -Math.PI / 2},
-  {fromX: -TRAM_LOOP_HALF, fromZ: -TRAM_LOOP_HALF, stepX: 0, stepZ: 1, heading: Math.PI},
+// daya. Tiap sisi: [x awal, z awal, langkah x, langkah z, hadap].
+const SIDE_ROWS = [
+  [-TRAM_LOOP_HALF, TRAM_LOOP_HALF, 1, 0, Math.PI / 2],
+  [TRAM_LOOP_HALF, TRAM_LOOP_HALF, 0, -1, 0],
+  [TRAM_LOOP_HALF, -TRAM_LOOP_HALF, -1, 0, -Math.PI / 2],
+  [-TRAM_LOOP_HALF, -TRAM_LOOP_HALF, 0, 1, Math.PI],
 ];
+const LOOP_SIDES = SIDE_ROWS.map(([fromX, fromZ, stepX, stepZ, heading]) =>
+  ({fromX, fromZ, stepX, stepZ, heading}));
 
 // Nama dan posisi empat halte di sudut-sudut loop.
-const STOPS = [
-  {x: -TRAM_LOOP_HALF, z: TRAM_LOOP_HALF, name: 'Plaza South'},
-  {x: TRAM_LOOP_HALF, z: TRAM_LOOP_HALF, name: 'Marina East'},
-  {x: TRAM_LOOP_HALF, z: -TRAM_LOOP_HALF, name: 'Hotel North'},
-  {x: -TRAM_LOOP_HALF, z: -TRAM_LOOP_HALF, name: 'Docks West'},
+// [x, z, name]
+const STOP_ROWS = [
+  [-TRAM_LOOP_HALF, TRAM_LOOP_HALF, 'Plaza South'],
+  [TRAM_LOOP_HALF, TRAM_LOOP_HALF, 'Marina East'],
+  [TRAM_LOOP_HALF, -TRAM_LOOP_HALF, 'Hotel North'],
+  [-TRAM_LOOP_HALF, -TRAM_LOOP_HALF, 'Docks West'],
 ];
+const STOPS = STOP_ROWS.map(([x, z, name]) => ({x, z, name}));
 
 export function createTram() {
   return {
@@ -66,15 +70,15 @@ export function tickTram(tram, dt) {
 
 // Posisi tiap gerbong trem saat ini, untuk renderer.
 export function tramPoses(tram) {
-  const out = [];
-  for (const car of tram.cars) {
+  return tram.cars.map((car) => {
     const pose = tramPose(car.along);
-    out.push({x: pose.x, z: pose.z, angle: pose.angle, line: car.line});
-  }
-  return out;
+    return {x: pose.x, z: pose.z, angle: pose.angle, line: car.line};
+  });
 }
 
 // Jarak tempuh halte ke-i di sepanjang loop, untuk perhitungan ETA.
+// Halte duduk di tengah tiap sisi loop, jadi halte ke-i berada pada
+// jarak i * 208 + 104 meter dari titik awal.
 function stopAlong(stopIndex) {
   return (stopIndex % 4) * SIDE + SIDE / 2;
 }

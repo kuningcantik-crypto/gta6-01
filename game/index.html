@@ -7,59 +7,66 @@
 <link rel="icon" href="data:,">
 <title>Solmar Bay — Open World</title>
 <style>
-  /* Full-screen canvas with the HUD floating above it. */
-  html, body { height: 100%; margin: 0; overflow: hidden; background: #1b2b4a; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  /* Palette and layout tokens for the whole HUD. */
+  :root {
+    --ink: #fff;
+    --gold: #ffd76e;
+    --green: #7dff9a;
+    --red: #ff8a7a;
+    --panel: rgba(10, 16, 28, .58);
+    --panel-line: rgba(255, 255, 255, .08);
+    --dark: #1b2b4a;
+  }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--dark); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #game { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
-  .panel { padding: 8px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(10, 16, 28, .58); }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: var(--ink); text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  .panel { padding: 8px 12px; border: 1px solid var(--panel-line); border-radius: 10px; background: var(--panel); }
   .label { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; opacity: .75; }
 
-  /* Top-left: cash, health, respect. */
+  /* Corner clusters: vitals top-left, wanted top-right, car bottom-right. */
   #top-left { position: absolute; top: 14px; left: 14px; }
-  #cash { color: #7dff9a; font-size: 28px; font-weight: 800; }
+  #cash { color: var(--green); font-size: 28px; font-weight: 800; }
   #health-bar { width: 180px; height: 10px; margin-top: 6px; overflow: hidden; border-radius: 5px; background: rgba(0,0,0,.5); }
   #health-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff5a4e, #ff9a3d); }
   #health-text { margin-top: 3px; font-size: 12px; opacity: .9; }
   #respect { margin-top: 8px; }
-  #respect-name { color: #ffd76e; font-size: 13px; font-weight: 800; letter-spacing: 1px; }
+  #respect-name { color: var(--gold); font-size: 13px; font-weight: 800; letter-spacing: 1px; }
   #respect-bar { width: 180px; height: 6px; margin-top: 4px; overflow: hidden; border-radius: 3px; background: rgba(0,0,0,.5); }
-  #respect-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #ffd76e, #ff9a3d); }
+  #respect-fill { width: 0%; height: 100%; background: linear-gradient(90deg, var(--gold), #ff9a3d); }
   #respect-text { margin-top: 3px; font-size: 11px; opacity: .85; }
 
-  /* Top-right: wanted stars, clock, weapons. */
   #top-right { position: absolute; top: 14px; right: 14px; text-align: right; }
   #stars { font-size: 26px; letter-spacing: 2px; }
   #wanted-label { font-size: 11px; letter-spacing: 2px; opacity: .8; }
   #clock { margin-top: 4px; font-size: 15px; font-weight: 700; }
   #weapons { min-width: 168px; margin-top: 8px; text-align: left; font-size: 12px; line-height: 1.7; }
-  #weapons .slot { display: flex; justify-content: space-between; gap: 10px; padding: 0 4px; border-radius: 4px; }
-  #weapons .slot.current { background: rgba(255, 215, 110, .22); color: #ffd76e; font-weight: 800; }
-  #weapons .slot.locked { opacity: .45; }
-  #weapons .slot .ammo { font-weight: 700; }
+  #weapons span { display: inline-block; margin-right: 8px; padding: 0 4px; border-radius: 4px; }
+  #weapons span.active { background: rgba(255, 215, 110, .22); color: var(--gold); font-weight: 800; }
 
   /* Mission header, centred at the top. */
   #mission-header { position: absolute; top: 14px; left: 50%; width: 380px; max-width: 46%; transform: translateX(-50%); text-align: center; }
-  #mission-chapter { color: #ffd76e; font-size: 11px; font-weight: 800; letter-spacing: 2px; }
+  #mission-chapter { color: var(--gold); font-size: 11px; font-weight: 800; letter-spacing: 2px; }
   #mission-title { margin-top: 1px; font-size: 17px; font-weight: 800; }
   #mission-stage { height: 6px; margin-top: 6px; overflow: hidden; border-radius: 3px; background: rgba(0,0,0,.5); }
-  #mission-stage-fill { width: 0%; height: 100%; background: #ffd76e; }
+  #mission-stage-fill { width: 0%; height: 100%; background: var(--gold); }
   #mission-objective { margin-top: 5px; font-size: 13px; font-weight: 600; }
   #mission-next { margin-top: 2px; font-size: 11px; letter-spacing: .5px; opacity: .8; }
-  #mission-timer { margin-top: 2px; color: #ff8a7a; font-size: 15px; font-weight: 800; }
+  #mission-timer { margin-top: 2px; color: var(--red); font-size: 15px; font-weight: 800; }
 
-  /* Left side: dispatch and crew panels. */
+  /* Left column: dispatch traffic, crew abilities, living-city lines. */
   #dispatch { position: absolute; top: 168px; left: 14px; min-width: 210px; font-size: 12px; line-height: 1.65; }
-  #dispatch-title { color: #ff8a7a; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
+  #dispatch-title { color: var(--red); font-size: 12px; font-weight: 800; letter-spacing: 1px; }
   #dispatch-rows { margin-top: 2px; }
-  #dispatch-rows .unit { display: flex; justify-content: space-between; gap: 10px; }
-  #dispatch-rows .tactic { color: #ffd76e; font-weight: 700; }
+  .dispatch-row { white-space: nowrap; }
   #crew { position: absolute; top: 430px; left: 14px; min-width: 210px; font-size: 12px; line-height: 1.6; }
-  #crew .ability { display: flex; justify-content: space-between; gap: 8px; }
-  #crew .ability b { color: #7dd8ff; }
-  #crew .cd { color: #ffd76e; font-weight: 700; }
+  .crew-row { display: flex; justify-content: space-between; gap: 8px; }
+  .crew-key { color: #7dd8ff; font-weight: 800; }
+  .crew-cd { color: var(--gold); font-weight: 700; }
+  #citylife { position: absolute; left: 12px; top: 340px; font-size: 12px; line-height: 1.5; }
+  #fps-line { position: absolute; right: 12px; top: 12px; display: none; font-size: 12px; color: var(--green); }
 
-  /* Bottom-left: district + minimap. Bottom-right: car + speed. */
+  /* Bottom corners: district + minimap left, car + speed right. */
   #district { position: absolute; bottom: 204px; left: 14px; font-size: 12px; line-height: 1.5; }
   #district-name { font-size: 14px; font-weight: 800; letter-spacing: 1px; }
   #minimap { position: absolute; bottom: 14px; left: 14px; width: 180px; height: 180px; border: 2px solid rgba(255,255,255,.5); border-radius: 50%; background: #274b2e; }
@@ -69,39 +76,39 @@
   #speed { font-size: 34px; font-weight: 800; line-height: 1; }
   #speed small { font-size: 14px; font-weight: 700; opacity: .8; }
 
-  /* Centre-bottom: radio, dialogue, messages, crosshair, flash, ticker. */
-  #radio-line { position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%); color: #ffd76e; font-size: 13px; font-weight: 700; white-space: nowrap; }
+  /* Centre column: radio, dialogue, messages, ticker, flash, crosshair. */
+  #radio-line { position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%); color: var(--gold); font-size: 13px; font-weight: 700; white-space: nowrap; }
   #dialogue { position: absolute; bottom: 120px; left: 50%; display: none; width: 520px; max-width: 86%; align-items: center; gap: 12px; transform: translateX(-50%); }
-  #dialogue-portrait { flex: 0 0 44px; display: flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 50%; background: linear-gradient(135deg, #ff5fa2, #ffd76e); color: #1b2b4a; font-size: 22px; font-weight: 900; text-shadow: none; }
-  #dialogue-name { color: #ffd76e; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
+  #dialogue-portrait { flex: 0 0 44px; display: flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 50%; background: linear-gradient(135deg, #ff5fa2, var(--gold)); color: var(--dark); font-size: 22px; font-weight: 900; text-shadow: none; }
+  #dialogue-name { color: var(--gold); font-size: 12px; font-weight: 800; letter-spacing: 1px; }
   #dialogue-text { font-size: 14px; font-weight: 600; line-height: 1.4; }
   #message { position: absolute; bottom: 260px; left: 50%; transform: translateX(-50%); font-size: 17px; font-weight: 600; text-align: center; opacity: 0; transition: opacity .3s; }
-  #ticker { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 640px; max-width: 92%; padding: 6px 12px; border-radius: 4px; background: rgba(10, 16, 28, .72); color: #ffd76e; font-size: 12px; font-weight: 600; letter-spacing: .4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #ticker { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 640px; max-width: 92%; padding: 6px 12px; border-radius: 4px; background: rgba(10, 16, 28, .72); color: var(--gold); font-size: 12px; font-weight: 600; letter-spacing: .4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #crosshair { position: absolute; top: 50%; left: 50%; display: none; width: 14px; height: 14px; margin: -7px 0 0 -7px; }
   #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; }
   #crosshair::before { top: 0; left: 6px; width: 2px; height: 14px; }
   #crosshair::after { top: 6px; left: 0; width: 14px; height: 2px; }
   #flash { position: absolute; top: 22%; left: 50%; display: none; transform: translateX(-50%); text-align: center; }
-  #flash-title { color: #ffd76e; font-size: 34px; font-weight: 900; }
-  #flash-reward { color: #7dff9a; font-size: 24px; font-weight: 800; }
+  #flash-title { color: var(--gold); font-size: 34px; font-weight: 900; }
+  #flash-reward { color: var(--green); font-size: 24px; font-weight: 800; }
   #controls { position: absolute; right: 14px; bottom: 150px; font-size: 12px; line-height: 1.5; text-align: right; opacity: .75; }
 
   /* Full-screen menus. */
   .screen { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(180deg, rgba(10,16,40,.35), rgba(10,16,40,.78)); color: #fff; pointer-events: auto; }
   #screen-title { background: linear-gradient(180deg, rgba(10,16,40,.18), rgba(10,16,40,.55)); }
-  .screen h1 { margin: 0; color: #ffd76e; font-size: 64px; letter-spacing: 4px; text-shadow: 0 4px 24px rgba(0,0,0,.6); }
-  .screen h2 { margin: 0; color: #ffd76e; font-size: 40px; }
+  .screen h1 { margin: 0; color: var(--gold); font-size: 64px; letter-spacing: 4px; text-shadow: 0 4px 24px rgba(0,0,0,.6); }
+  .screen h2 { margin: 0; color: var(--gold); font-size: 40px; }
   .stats { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 16px; padding: 12px 18px; border: 1px solid rgba(255, 215, 110, .35); border-radius: 8px; background: rgba(10, 16, 28, .55); color: #dfe6ee; font-size: 14px; font-weight: 600; text-align: left; }
   .screen p { max-width: 560px; padding: 0 20px; font-size: 17px; line-height: 1.55; }
-  .screen .sub { color: #ffd76e; font-weight: 700; letter-spacing: 2px; }
-  .btn { margin: 6px; padding: 13px 30px; border: none; border-radius: 10px; background: #ffd76e; color: #1b2b4a; font-size: 17px; font-weight: 700; cursor: pointer; pointer-events: auto; }
+  .screen .sub { color: var(--gold); font-weight: 700; letter-spacing: 2px; }
+  .btn { margin: 6px; padding: 13px 30px; border: none; border-radius: 10px; background: var(--gold); color: var(--dark); font-size: 17px; font-weight: 700; cursor: pointer; pointer-events: auto; }
   .btn.secondary { background: rgba(255,255,255,.16); color: #fff; border: 1px solid rgba(255,255,255,.5); }
   .btn.small { padding: 9px 18px; font-size: 14px; }
   .keys { font-size: 14px; line-height: 1.8; opacity: .9; }
   #garage-list, #missions-list { max-width: 560px; padding: 0 20px; font-size: 15px; line-height: 1.9; text-align: left; }
-  #missions-list .done { color: #7dff9a; }
-  #missions-list .current { color: #ffd76e; font-weight: 800; }
-  #missions-list .locked { opacity: .55; }
+  .garage-row, .mission-row, .settings-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 8px 0; font-size: 15px; }
+  .settings-row button { min-width: 90px; padding: 6px 10px; font-size: 14px; }
+  #photo-hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: none; z-index: 40; padding: 6px 14px; border-radius: 999px; background: rgba(0,0,0,.55); font-size: 13px; letter-spacing: 2px; color: #fff; pointer-events: none; }
 
   /* Touch controls: only on coarse pointers. */
   #touch-ui { display: none; }
@@ -146,12 +153,8 @@
     /* Joystick goes to the bottom corner; the minimap keeps its spot above it. */
     #joystick { bottom: 24px; }
   }
-  #citylife { position: absolute; left: 12px; top: 340px; font-size: 12px; line-height: 1.5; }
-  #fps-line { position: absolute; right: 12px; top: 12px; font-size: 12px; color: #7dff9a; display: none; }
-  #photo-hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); font-size: 13px; letter-spacing: 2px; color: #fff; background: rgba(0,0,0,.55); padding: 6px 14px; border-radius: 999px; display: none; z-index: 40; pointer-events: none; }
-  .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 8px 0; font-size: 15px; }
-  .setting-row button { min-width: 90px; padding: 6px 10px; font-size: 14px; }
 </style>
+<!-- three.js is vendored under game/vendor/ — no CDN, so the game loads offline. -->
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
 </script>

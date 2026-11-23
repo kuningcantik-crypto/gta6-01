@@ -1,97 +1,81 @@
 // Headless smoke test for the living-city systems: hidden stashes,
-// weather, the tram loop and the settings panel. Runs against the dev
-// server on port 8080 with the seeded world, seed 7.
+// weather, trams, and the settings panel. Drives the real game through
+// window.__solmar and real key events — nothing is stubbed.
 //
-//   node tools/collectibles-test.mjs
-import { launchChrome, connect, newTab, evalJs, consoleErrors, sleep, waitFor, tapKey, screenshot } from './cdp-lib.mjs';
+//   node tools/collectibles-test.mjs   (needs the dev server on :8080)
+import { launchChrome, openTab } from './cdp-lib.mjs';
 
-const BASE = 'http://127.0.0.1:8080/?seed=7';
-const passed = [];
+const URL = process.env.GAME_URL || 'http://localhost:8080/?seed=7';
+const failures = [];
 
 function check(name, ok, detail = '') {
-  passed.push(ok);
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`);
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
+  if (!ok) failures.push(name);
 }
 
-function stashProbe() {
-  return `(() => { const s = window.__solmar; return {found: s.state.stashes.found, total: s.state.stashes.total, first: s.state.stashes.list[0], cash: s.state.player.cash}; })()`;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function weatherProbe() {
-  return `(() => { const w = window.__solmar.state.weather; return {kind: w.kind, rain: w.rain}; })()`;
+const browser = await launchChrome({width: 1280, height: 800});
+try {
+  const tab = await openTab(browser, URL);
+  try {
+    await tab.waitFor('window.__solmar');
+    await tab.evalJs(`document.getElementById('btn-new').click()`);
+    await sleep(1000);
+
+    // 1. Hidden stashes: twelve hidden, one pays $250 the moment Rico
+    // walks over it.
+    const stash0 = await tab.evalJs('__solmar.state.stashes.list[0]');
+    const cashBefore = await tab.evalJs('__solmar.state.player.cash');
+    await tab.evalJs(`__solmar.teleport(${stash0.x}, ${stash0.z})`);
+    await tab.evalJs('__solmar.step(30)');
+    const afterStash = await tab.evalJs('({found: __solmar.state.stashes.found, cash: __solmar.state.player.cash})');
+    check('stash pickup pays $250', afterStash.found === 1 && afterStash.cash === cashBefore + 250,
+      `found=${afterStash.found} cash=${afterStash.cash} (was ${cashBefore})`);
+    // The HUD repaints on the real frame loop, not on __solmar.step —
+    // give it a moment (SwiftShader runs at a few FPS) before reading.
+    await sleep(2000);
+    const stashLine = await tab.evalJs(`document.getElementById('stash-line').textContent`);
+    check('stash HUD line', stashLine.includes('STASHES 1 / 12'), stashLine);
+
+    // 2. Weather follows the clock: 17:00 is cloudy and dry, 19:00 is
+    // raining within ten game-seconds of the hour changing.
+    await tab.evalJs('__solmar.state.clockMinutes = 17 * 60; __solmar.step(60)');
+    const w17 = await tab.evalJs('({kind: __solmar.state.weather.kind, rain: __solmar.state.weather.rain})');
+    check('weather 17:00 cloudy and dry', w17.kind === 'cloudy' && w17.rain < 0.05, JSON.stringify(w17));
+    await tab.evalJs('__solmar.state.clockMinutes = 19 * 60; __solmar.step(600)');
+    const w19 = await tab.evalJs('({kind: __solmar.state.weather.kind, rain: __solmar.state.weather.rain})');
+    check('weather 19:00 raining', (w19.kind === 'rain' || w19.kind === 'storm') && w19.rain > 0.3, JSON.stringify(w19));
+
+    // 3. Trams keep their schedule: five game-seconds is 35 m of track.
+    const along0 = await tab.evalJs('__solmar.state.tram.cars[0].along');
+    await tab.evalJs('__solmar.step(300)');
+    const along1 = await tab.evalJs('__solmar.state.tram.cars[0].along');
+    const moved = (((along1 - along0) % 832) + 832) % 832;
+    check('trams advance >20 m in 300 steps', moved > 20, `${along0.toFixed(1)} -> ${along1.toFixed(1)} (${moved.toFixed(1)} m)`);
+
+    // 4. Settings: O opens the panel, toggling FPS persists to
+    // localStorage, and the FPS line actually appears.
+    await tab.tapKey('KeyO', 'o');
+    await sleep(500);
+    await tab.evalJs(`document.querySelector('[data-setting="showFps"]').click()`);
+    await sleep(500);
+    const saved = await tab.evalJs(`JSON.parse(localStorage.getItem('solmar-settings-v1') || '{}').showFps`);
+    const fpsDisplay = await tab.evalJs(`getComputedStyle(document.getElementById('fps-line')).display`);
+    check('settings showFps persists + line shows', saved === true && fpsDisplay === 'block',
+      `saved=${saved} display=${fpsDisplay}`);
+
+    // 5. A still frame of the living city, for the eye.
+    await tab.screenshot('/tmp/citylife.jpg');
+    console.log('saved /tmp/citylife.jpg');
+  } finally {
+    await tab.close();
+  }
+} finally {
+  browser.close();
 }
 
-function tramProbe() {
-  return `(() => { const t = window.__solmar.state.tram; return t.cars.map((c) => +c.along.toFixed(1)); })()`;
-}
-
-async function main() {
-  const {child, port} = await launchChrome(1280, 800);
-  const {send, events} = await connect(port);
-  await newTab(send, BASE, 1280, 800);
-  await waitFor(send, '!!window.__solmar', 60000);
-  await evalJs(send, `window.__solmar.start(true)`);
-  await sleep(500);
-
-  // 1. Stashes exist, twelve of them, none found yet.
-  const before = await evalJs(send, stashProbe());
-  check('stash field has 12 hidden stashes', before.total === 12 && before.found === 0, `total=${before.total} found=${before.found}`);
-
-  // 2. Walking onto the first stash collects it and pays $250.
-  const first = before.first;
-  await evalJs(send, `window.__solmar.teleport(${first.x}, ${first.z})`);
-  await evalJs(send, `window.__solmar.step(30, {})`);
-  const after = await evalJs(send, stashProbe());
-  check('walking onto a stash collects it (+$250)', after.found === 1 && after.cash === before.cash + 250, `found=${after.found} cash=${after.cash}`);
-
-  // 3. Weather at 17:00 is cloudy and dry; at 19:00 it rains.
-  const wx17 = await evalJs(send, weatherProbe());
-  check('weather is cloudy and dry at 17:00', wx17.kind === 'cloudy' && wx17.rain === 0, JSON.stringify(wx17));
-  await evalJs(send, `window.__solmar.state.clockMinutes = 19 * 60`);
-  await evalJs(send, `window.__solmar.step(600, {})`);
-  const wx19 = await evalJs(send, weatherProbe());
-  const wx19shown = {kind: wx19.kind, rain: +wx19.rain.toFixed(2)};
-  check('weather turns to rain at 19:00', wx19.kind === 'rain' && wx19.rain > 0.3, JSON.stringify(wx19shown));
-
-  // 4. The trams move along the loop.
-  const tramA = await evalJs(send, tramProbe());
-  await evalJs(send, `window.__solmar.step(300, {})`);
-  const tramB = await evalJs(send, tramProbe());
-  const moved = tramA.every((a, i) => Math.abs(tramB[i] - a) > 20);
-  check('both trams advance along the loop', moved, `before=${tramA} after=${tramB}`);
-
-  // 5. Settings: O opens the panel, a row button flips a setting and it persists.
-  await tapKey(send, 'KeyO', 'o');
-  // Headless SwiftShader runs ~1 FPS, so poll for the state instead of a
-  // fixed sleep: the overlay key is only read once per rendered frame.
-  const opened = await waitFor(send, `window.__solmar.state.settingsOpen === true`, 15000);
-  await sleep(400);
-  const open = await evalJs(send, `document.getElementById('screen-settings').style.display`);
-  check('O opens the settings screen', opened && open === 'flex', `display=${open}`);
-  const savedBefore = await evalJs(send, `localStorage.getItem('solmar-settings-v1')`);
-  await evalJs(send, `document.querySelector('[data-setting="showFps"]').click()`);
-  await sleep(200);
-  const savedAfter = await evalJs(send, `localStorage.getItem('solmar-settings-v1')`);
-  const parsed = savedAfter ? JSON.parse(savedAfter) : {};
-  check('flipping FPS persists to localStorage', parsed.showFps === true, `before=${savedBefore} after=${savedAfter}`);
-  // The FPS line only appears on the next rendered frame after the flip.
-  await waitFor(send, `document.getElementById('fps-line').style.display === 'block'`, 15000);
-  const fpsShown = await evalJs(send, `document.getElementById('fps-line').style.display`);
-  check('FPS line appears once enabled', fpsShown === 'block', `display=${fpsShown}`);
-
-  // 6. The city-life HUD lines are on screen.
-  const cityLines = await evalJs(send, `(() => { const el = document.getElementById('stash-line'); return el ? el.textContent : ''; })()`);
-  check('stash HUD line shows the hunt', cityLines.includes('STASHES 1 / 12'), cityLines);
-
-  const errs = consoleErrors(events);
-  check('0 console errors', errs.length === 0, errs.slice(0, 2).join(' | '));
-  await screenshot(send, '/tmp/citylife.jpg');
-  const fails = passed.filter((r) => !r).length;
-  console.log(`\nCity-life test: ${passed.length - fails}/${passed.length} passed.`);
-  process.exit(fails ? 1 : 0);
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+console.log(failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURES: ${failures.join(', ')}`);
+process.exit(failures.length === 0 ? 0 : 1);

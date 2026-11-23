@@ -13,6 +13,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR
   ? resolve(process.env.MAKEFUN_OUTPUT_DIR)
   : resolve(here, 'out');
+
+// The kit's limits for this entry: how much text, how many screenshots,
+// how many game files, and how big they may be.
 const CAPS = {
   text_max_bytes: 163840,
   screenshots: {max: 4, max_bytes: 262144},
@@ -21,13 +24,22 @@ const CAPS = {
   game_path_max_bytes: 1000,
 };
 
-async function gatherShots(shotDir) {
-  const names = (await readdir(shotDir))
-    .filter((n) => /\.jpe?g$/i.test(n))
-    .sort();
+function isJpeg(name) {
+  return /\.jpe?g$/i.test(name);
+}
+
+// The four screenshots, in order, from the screenshots folder. Exactly
+// four, all present — the dossier needs one frame per scene. The names
+// sort alphabetically into scene order (1-start, 2-play, 3-chase, 4-end),
+// which is the order the judges see them in.
+async function collectShots(shotDir) {
+  const names = (await readdir(shotDir)).filter(isJpeg).sort();
   const shots = names.map((name) => join(shotDir, name));
-  if (shots.length !== 4 || !shots.every((f) => existsSync(f))) {
+  if (shots.length !== 4) {
     throw new Error(`Need exactly 4 screenshots in ${shotDir}, found ${shots.length}`);
+  }
+  for (const shot of shots) {
+    if (!existsSync(shot)) throw new Error(`Screenshot missing: ${shot}`);
   }
   return shots;
 }
@@ -37,7 +49,7 @@ async function build() {
   const shotDir = join(here, 'screenshots');
   const entrypoint = join(gameDir, 'src', 'main.js');
   if (!existsSync(entrypoint)) throw new Error(`Game entrypoint missing: ${entrypoint}`);
-  const shots = await gatherShots(shotDir);
+  const shots = await collectShots(shotDir);
   await mkdir(outDir, {recursive: true});
   await cp(gameDir, join(outDir, 'game'), {recursive: true});
   await cp(shotDir, join(outDir, 'screenshots'), {recursive: true});

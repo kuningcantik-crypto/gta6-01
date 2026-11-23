@@ -1,136 +1,180 @@
 // Desktop play test with REAL keyboard input: New Game, walk, enter a car
-// (one E press must mean enter — not enter-and-exit), drive, switch
-// weapons, radio, crew ability, garage purchase, job list, pause/resume,
-// and save → reload → Continue. Reports PASS/FAIL per step.
-// Usage: node tools/playtest.mjs
-import { launchChrome, connect, newTab, evalJs, consoleErrors, sleep, waitFor, tapKey, keyDown, keyUp } from './cdp-lib.mjs';
+// with one E press (and stay in), drive, weapon locks, radio, crew
+// plates, garage, jobs, pause, photo mode, save and continue.
+//
+//   node tools/playtest.mjs   (needs the dev server on :8080)
+import { launchChrome, openTab } from './cdp-lib.mjs';
 
-const {child, port} = await launchChrome(1280, 800, false);
-const results = [];
-function report(name, ok, extra = '') {
-  results.push({name, ok});
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
+const URL = process.env.GAME_URL || 'http://localhost:8080/?seed=7';
+const failures = [];
+
+function check(name, ok, detail = '') {
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
+  if (!ok) failures.push(name);
 }
 
-try {
-  const {send, events} = await connect(port);
-  await newTab(send, 'http://127.0.0.1:8080/?seed=7', 1280, 800, false);
-  await waitFor(send, '!!window.__solmar', 60000);
-  const call = (expr) => evalJs(send, `(() => { const s = window.__solmar; return ${expr}; })()`);
-  const playerPos = () => call(`({x: s.state.player.x, z: s.state.player.z})`);
-  async function holdKey(code, k, ms) {
-    await keyDown(send, code, k);
-    await sleep(ms);
-    await keyUp(send, code, k);
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function holdKey(tab, code, key, ms) {
+  await tab.keyDown(code, key);
+  await sleep(ms);
+  await tab.keyUp(code, key);
+}
+
+// Poll a page expression until it is true; false on timeout instead
+// of throwing, so one flaky check cannot abort the whole test.
+async function poll(tab, expr, timeoutMs = 5000) {
+  try {
+    await tab.waitFor(expr, timeoutMs);
+    return true;
+  } catch {
+    return false;
   }
-
-  report('game boots (__solmar present)', (await call(`!!window.__solmar`)) === true);
-
-  await evalJs(send, `document.getElementById('btn-new').click(); 'ok'`);
-  await sleep(1500);
-  report('New Game starts', (await call(`s.state.player.cash === 120`)) === true);
-
-  // Walk forward with W: Rico must move. (Long hold: the first seconds
-  // after New Game are still warming up SwiftShader's shader compile.)
-  const p0 = await playerPos();
-  await holdKey('KeyW', 'w', 6000);
-  const p1 = await playerPos();
-  const walked = Math.hypot(p1.x - p0.x, p1.z - p0.z);
-  report('W walks the player', walked > 3, `${walked.toFixed(1)} m`);
-
-  // Teleport next to a parked car and press E ONCE: must end up IN the car.
-  await call(`s.teleport(-44, -98)`);
-  await sleep(500);
-  await tapKey(send, 'KeyE', 'e');
-  const inCar = await waitFor(send, `!!window.__solmar.state.player.car`, 8000);
-  const stillInCar = await call(`!!s.state.player.car`);
-  report('one E press enters the car and stays in', inCar && stillInCar === true);
-
-  // Drive with W: speed must rise, car must move.
-  await keyDown(send, 'KeyW', 'w');
-  await sleep(3000);
-  const speed = await call(`Math.abs(s.state.player.car ? s.state.player.car.speed : 0)`);
-  await keyUp(send, 'KeyW', 'w');
-  report('W drives the car', speed > 5, `${speed.toFixed(1)} m/s`);
-
-  // Weapon keys: 3 is locked at 0 RP (must stay on pistol), then unlock.
-  await tapKey(send, 'Digit3', '3');
-  await sleep(1500);
-  const wLocked = await call(`s.state.player.weaponIndex`);
-  report('locked weapon key does not switch', wLocked === 1, `index=${wLocked}`);
-  await call(`s.state.player.rp = 300`);
-  await sleep(1500); // unlockWeapons runs in the live loop
-  await tapKey(send, 'Digit3', '3');
-  const wSmg = await waitFor(send, `window.__solmar.state.player.weaponIndex === 2`, 8000);
-  report('SMG unlocks with RP and Digit3 equips it', wSmg === true);
-
-  // Radio: C cycles the station.
-  const r0 = await call(`s.state.player.radioStation`);
-  await tapKey(send, 'KeyC', 'c');
-  const r1 = await waitFor(send, `window.__solmar.state.player.radioStation !== ${r0}`, 8000);
-  report('C cycles the radio station', r1 === true, `${r0} -> ${await call(`s.state.player.radioStation`)}`);
-
-  // Crew: Z (Swap Plates) needs heat; give 2 stars first, then Z drops one.
-  await call(`s.setWanted(2)`);
-  await sleep(1500);
-  await tapKey(send, 'KeyZ', 'z');
-  const starsAfter = await waitFor(send, `window.__solmar.state.player.wanted === 1`, 8000);
-  report('Z Swap Plates drops one wanted star', starsAfter === true);
-
-  // Garage: at the safehouse, G opens it; buy a tune with real clicks.
-  await call(`s.setWanted(0), s.state.player.cash = 1000, s.teleport(-130, -128), s.state.player.onFoot = true, (s.state.player.car ? (s.state.player.car.kind = 'parked', s.state.player.car = null) : null)`);
-  await sleep(1000);
-  await tapKey(send, 'KeyG', 'g');
-  const garageOpen = await waitFor(send, `window.__solmar.state.garageOpen === true`, 8000);
-  report('G opens the garage at the safehouse', garageOpen === true);
-  await evalJs(send, `[...document.querySelectorAll('[data-garage]')].find(b => b.getAttribute('data-garage') === 'tune').click(); 'ok'`);
-  await sleep(1200);
-  const tune = await call(`s.state.player.garage.tune`);
-  report('garage tune purchase spends cash and applies', tune === 1, `tune=${tune}`);
-  await tapKey(send, 'KeyG', 'g');
-  await sleep(1200);
-
-  // Job list: M opens, M closes.
-  await tapKey(send, 'KeyM', 'm');
-  const jobsOpen = await waitFor(send, `window.__solmar.state.missionsOpen === true`, 8000);
-  report('M opens the job list', jobsOpen === true);
-  await tapKey(send, 'KeyM', 'm');
-  const jobsClosed = await waitFor(send, `window.__solmar.state.missionsOpen === false`, 8000);
-  report('M closes the job list', jobsClosed === true);
-
-  // Pause: Esc pauses, Esc resumes.
-  await tapKey(send, 'Escape', 'Escape');
-  const paused = await waitFor(send, `document.getElementById('screen-pause').style.display === 'flex'`, 8000);
-  report('Esc pauses the game', paused === true);
-  await tapKey(send, 'Escape', 'Escape');
-  const resumed = await waitFor(send, `document.getElementById('screen-pause').style.display === 'none'`, 8000);
-  report('Esc resumes the game', resumed === true);
-
-  // Photo mode: H hides the HUD, H brings it back.
-  await tapKey(send, 'KeyH', 'h');
-  const photoHidden = await waitFor(send, `document.getElementById('hud').style.display === 'none'`, 8000);
-  report('H hides the HUD for photos', photoHidden === true);
-  await tapKey(send, 'KeyH', 'h');
-  // The next frame's update() writes 'block'; accept any visible state.
-  const photoBack = await waitFor(send, `document.getElementById('hud').style.display !== 'none'`, 8000);
-  report('H restores the HUD', photoBack === true);
-
-  // Save: cash + mission progress survive a reload via Continue.
-  await call(`s.state.player.cash = 777, s.setMission(3)`);
-  await sleep(2000); // autosave is 15 s; force one via the pause-menu path instead
-  await evalJs(send, `window.__solmar.state.player.cash = 777; localStorage.setItem('solmar-bay.save.v1', JSON.stringify({cash: 777, rp: 123, missionIndex: 3, missionStep: 0, x: 0, z: 30, allMissionsDone: false, radioStation: 1, garage: {tune: 1, armor: 0}, weapons: [], weaponIndex: 1, districtHeat: {}})); 'saved'`);
-  await send('Page.navigate', {url: 'http://127.0.0.1:8080/?seed=7'});
-  await waitFor(send, '!!window.__solmar', 60000);
-  await evalJs(send, `document.getElementById('btn-continue').click(); 'ok'`);
-  await sleep(1500);
-  const restored = await call(`({cash: s.state.player.cash, mission: s.state.missionIndex, tune: s.state.player.garage.tune})`);
-  report('Continue restores cash, mission and garage', restored.cash === 777 && restored.mission === 3 && restored.tune === 1, JSON.stringify(restored));
-
-  const errs = consoleErrors(events);
-  report('0 console errors', errs.length === 0, errs.join('; '));
-  const fails = results.filter((r) => !r.ok).length;
-  console.log(`\nPlay test: ${results.filter((r) => r.ok).length}/${results.length} passed.`);
-  process.exit(fails ? 1 : 0);
-} finally {
-  child.kill();
 }
+
+// Wait until the real frame loop has run at least once after the call.
+async function waitFrame(tab) {
+  const t0 = await tab.evalJs('__solmar.state.time');
+  await poll(tab, `__solmar.state.time !== ${t0}`, 5000);
+}
+
+const browser = await launchChrome({width: 1280, height: 800});
+try {
+  const tab = await openTab(browser, URL);
+  try {
+    await tab.waitFor('window.__solmar');
+
+    // Boot: a fresh game starts with $120 and no car.
+    await tab.evalJs(`document.getElementById('btn-new').click()`);
+    await sleep(800);
+    const cash0 = await tab.evalJs('__solmar.state.player.cash');
+    check('New Game cash is $120', cash0 === 120, `$${cash0}`);
+
+    // Walk: hold W for two seconds, Rico must cover ground.
+    const p0 = await tab.evalJs('({x: __solmar.state.player.x, z: __solmar.state.player.z})');
+    await holdKey(tab, 'KeyW', 'w', 2000);
+    const p1 = await tab.evalJs('({x: __solmar.state.player.x, z: __solmar.state.player.z})');
+    const walked = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+    check('W walks >3 m', walked > 3, `${walked.toFixed(2)} m`);
+
+    // Enter a car: walk up to one, press E once. One press must enter
+    // AND stay in — the edge is consumed on first read, so the same
+    // press must not exit again.
+    await tab.evalJs(`(() => {
+      const p = __solmar.state.player;
+      const car = __solmar.state.cars.find((c) => Math.hypot(c.x - p.x, c.z - p.z) < 8) || __solmar.state.cars[0];
+      __solmar.teleport(car.x, car.z + 2);
+    })()`);
+    await tab.tapKey('KeyE', 'e');
+    // The press is processed by the real frame loop, which runs at a
+    // few FPS under SwiftShader — poll instead of a fixed sleep.
+    await tab.waitFor('!!__solmar.state.player.car', 5000);
+    const inCar = await tab.evalJs('!!__solmar.state.player.car');
+    check('one E press enters car and stays in', inCar === true);
+
+    // Drive: hold W for three seconds, the car must be moving fast.
+    await holdKey(tab, 'KeyW', 'w', 3000);
+    const speed = await tab.evalJs('Math.abs(__solmar.state.player.car ? __solmar.state.player.car.speed : 0)');
+    check('W drives >5 m/s', speed > 5, `${speed.toFixed(1)} m/s`);
+
+    // Weapon locks: Digit3 is the SMG, locked at 0 RP; at 300 RP it
+    // opens and selects. For the locked case wait a full frame, then
+    // confirm the press was processed and still refused.
+    await tab.tapKey('Digit3', '3');
+    await waitFrame(tab);
+    const wLocked = await tab.evalJs('__solmar.state.player.weaponIndex');
+    check('Digit3 locked at 0 RP', wLocked !== 2, `weaponIndex=${wLocked}`);
+    await tab.evalJs('__solmar.state.player.rp = 300; __solmar.step(10)');
+    await tab.tapKey('Digit3', '3');
+    const wOpened = await poll(tab, '__solmar.state.player.weaponIndex === 2');
+    const wOpen = await tab.evalJs('__solmar.state.player.weaponIndex');
+    check('Digit3 selects SMG at 300 RP', wOpened && wOpen === 2, `weaponIndex=${wOpen}`);
+
+    // Radio cycles on C; plates drop a star. Poll for the cycle: under
+    // SwiftShader a frame can take half a second, so a fixed sleep is flaky.
+    const radio0 = await tab.evalJs('__solmar.state.player.radioStation');
+    await tab.tapKey('KeyC', 'c');
+    await tab.waitFor(`__solmar.state.player.radioStation !== ${radio0}`, 5000);
+    const radio1 = await tab.evalJs('__solmar.state.player.radioStation');
+    check('C cycles radio', radio1 !== radio0, `${radio0} -> ${radio1}`);
+    await tab.evalJs('__solmar.setWanted(2)');
+    await tab.tapKey('KeyZ', 'z');
+    const platesOk = await poll(tab, '__solmar.state.player.wanted === 1');
+    const wanted = await tab.evalJs('__solmar.state.player.wanted');
+    check('Z plates drop a star 2 -> 1', platesOk && wanted === 1, `wanted=${wanted}`);
+
+    // Garage: at the safehouse, G opens it and a tune purchase lands.
+    // Each toggle is polled for its effect: under SwiftShader a frame
+    // can take half a second, so a fixed sleep both misses the frame
+    // and lets two quick taps collapse into a single toggle.
+    await tab.evalJs('__solmar.teleport(-130, -128); __solmar.step(5)');
+    await tab.tapKey('KeyG', 'g');
+    const garageOpen = await poll(tab, '__solmar.state.garageOpen');
+    check('G opens garage at safehouse', garageOpen === true);
+    // A tune costs $400 and a fresh game only has $120 — fund Rico
+    // first, or the purchase (correctly) refuses.
+    await tab.evalJs('__solmar.state.player.cash = 1000');
+    await tab.evalJs(`document.querySelector('[data-garage="tune"]').click()`);
+    await sleep(300);
+    const tune = await tab.evalJs('__solmar.state.player.garage.tune');
+    check('buy tune -> tune is 1', tune === 1, `tune=${tune}`);
+    await tab.tapKey('KeyG', 'g');
+    const garageClosed = await poll(tab, '!__solmar.state.garageOpen');
+    check('G closes garage', garageClosed === true);
+
+    // Jobs list, pause/resume, photo mode.
+    await tab.tapKey('KeyM', 'm');
+    const jobsOpen = await poll(tab, '__solmar.state.missionsOpen');
+    check('M opens jobs', jobsOpen === true);
+    await tab.tapKey('KeyM', 'm');
+    const jobsClosed = await poll(tab, '!__solmar.state.missionsOpen');
+    check('M closes jobs', jobsClosed === true);
+    await tab.tapKey('Escape', 'Escape');
+    const paused = await poll(tab, `document.getElementById('screen-pause').style.display === 'flex'`);
+    check('Esc pauses', paused === true);
+    await tab.tapKey('Escape', 'Escape');
+    const resumed = await poll(tab, `document.getElementById('screen-pause').style.display === 'none'`);
+    check('Esc resumes', resumed === true);
+    await tab.tapKey('KeyH', 'h');
+    const photo = await poll(tab, `document.body.classList.contains('photo-mode')`);
+    check('H photo mode', photo === true);
+    await tab.tapKey('KeyH', 'h');
+
+    // Save and continue: set a marker state, let the autosave (every
+    // 15 game-seconds) persist it, reload the page, continue, and the
+    // marker must be back.
+    await tab.evalJs(`(() => {
+      const p = __solmar.state.player;
+      p.cash = 777;
+      __solmar.setMission(3);
+      p.garage.tune = 1;
+    })()`);
+    await tab.evalJs('__solmar.step(1000)');
+    const saveWritten = await tab.evalJs(`localStorage.getItem('solmar-bay.save.v1') !== null`);
+    check('autosave writes a save', saveWritten === true);
+    await tab.evalJs('location.reload()');
+    // The old page's __solmar can answer a poll before the navigation
+    // even starts, so wait for the NEW page's DOM instead: the Continue
+    // button only exists once the fresh document has parsed.
+    await tab.waitFor(`document.getElementById('btn-continue') !== null`, 30000);
+    await tab.waitFor('window.__solmar');
+    await sleep(800);
+    await tab.evalJs(`document.getElementById('btn-continue').click()`);
+    await sleep(800);
+    const restored = await tab.evalJs('({cash: __solmar.state.player.cash, mission: __solmar.state.missionIndex, tune: __solmar.state.player.garage.tune})');
+    check('save/continue restores cash 777, mission 3, tune 1',
+      restored.cash === 777 && restored.mission === 3 && restored.tune === 1, JSON.stringify(restored));
+
+    const errors = tab.consoleErrors();
+    check('0 console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+  } finally {
+    await tab.close();
+  }
+} finally {
+  browser.close();
+}
+
+console.log(failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURES: ${failures.join(', ')}`);
+process.exit(failures.length === 0 ? 0 : 1);

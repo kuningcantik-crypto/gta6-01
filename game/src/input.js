@@ -11,30 +11,32 @@ export const ACTION_RELOAD = 'reload';
 export const ACTION_JUMP = 'jump';
 
 // Physical key to game action. Both WASD and the arrow keys drive.
-const KEYMAP = {
-  KeyW: 'up', ArrowUp: 'up',
-  KeyS: 'down', ArrowDown: 'down',
-  KeyA: 'left', ArrowLeft: 'left',
-  KeyD: 'right', ArrowRight: 'right',
-  ShiftLeft: 'run', ShiftRight: 'run',
-  Space: 'jump',
-  KeyE: 'enter',
-  KeyF: 'punch',
-  KeyR: 'reload',
-  Enter: 'confirm',
-  Escape: 'pause', KeyP: 'pause',
-  Digit1: 'w1', Digit2: 'w2', Digit3: 'w3', Digit4: 'w4',
-  Digit5: 'w5', Digit6: 'w6', Digit7: 'w7',
-  KeyQ: 'cycleWeapon',
-  KeyC: 'radio',
-  KeyZ: 'plates',
-  KeyX: 'fix',
-  KeyV: 'eyes',
-  KeyG: 'garage',
-  KeyM: 'missions',
-  KeyO: 'settings',
-  KeyH: 'photo',
-};
+// [physical code, action]
+const KEY_ROWS = [
+  ['KeyW', 'up'], ['ArrowUp', 'up'],
+  ['KeyS', 'down'], ['ArrowDown', 'down'],
+  ['KeyA', 'left'], ['ArrowLeft', 'left'],
+  ['KeyD', 'right'], ['ArrowRight', 'right'],
+  ['ShiftLeft', 'run'], ['ShiftRight', 'run'],
+  ['Space', 'jump'],
+  ['KeyE', 'enter'],
+  ['KeyF', 'punch'],
+  ['KeyR', 'reload'],
+  ['Enter', 'confirm'],
+  ['Escape', 'pause'], ['KeyP', 'pause'],
+  ['Digit1', 'w1'], ['Digit2', 'w2'], ['Digit3', 'w3'], ['Digit4', 'w4'],
+  ['Digit5', 'w5'], ['Digit6', 'w6'], ['Digit7', 'w7'],
+  ['KeyQ', 'cycleWeapon'],
+  ['KeyC', 'radio'],
+  ['KeyZ', 'plates'],
+  ['KeyX', 'fix'],
+  ['KeyV', 'eyes'],
+  ['KeyG', 'garage'],
+  ['KeyM', 'missions'],
+  ['KeyO', 'settings'],
+  ['KeyH', 'photo'],
+];
+const KEYMAP = Object.fromEntries(KEY_ROWS);
 
 // The shared core: held flags, one-shot edges, the shoot pulse and the
 // mouse delta. Both the live keyboard input and the scripted test input
@@ -44,50 +46,67 @@ const KEYMAP = {
 // would fire 15 times — E would enter AND exit the car in one tap, M
 // would open AND close the job list, Q would cycle every weapon.
 function makeInputCore() {
-  const held = {};
-  const edge = {};
-  let shootPulse = false;
-  let mouseDX = 0;
-  return {
-    held,
-    edge,
+  const down = {};
+  const taps = {};
+  // Edges pressed during the current frame: endFrame() must NOT clear
+  // these, or a press that lands after this frame's reads (toggleOverlays
+  // runs before the step loop) would be wiped before the next frame
+  // ever sees it. They survive exactly one frame, then go stale.
+  const fresh = new Set();
+  let shotQueued = false;
+  let mouseDelta = 0;
+  const clearTaps = () => {
+    for (const action of Object.keys(taps)) taps[action] = false;
+  };
+  const core = {
+    held: down,
+    edge: taps,
     wasPressed(action) {
-      if (!edge[action]) return false;
-      edge[action] = false;
+      if (!taps[action]) return false;
+      taps[action] = false;
       return true;
     },
     takeShoot() {
-      const queued = shootPulse;
-      shootPulse = false;
+      const queued = shotQueued;
+      shotQueued = false;
       return queued;
     },
     takeMouseDX() {
-      const delta = mouseDX;
-      mouseDX = 0;
+      const delta = mouseDelta;
+      mouseDelta = 0;
       return delta;
     },
     endFrame() {
-      for (const action of Object.keys(edge)) edge[action] = false;
+      for (const action of Object.keys(taps)) {
+        if (!fresh.has(action)) taps[action] = false;
+      }
+      fresh.clear();
+    },
+    resetEdges() {
+      clearTaps();
+      fresh.clear();
     },
     setHeld(action, value) {
-      held[action] = !!value;
+      down[action] = !!value;
     },
     press(action) {
-      edge[action] = true;
+      taps[action] = true;
+      fresh.add(action);
     },
     release(action) {
-      held[action] = false;
+      down[action] = false;
     },
     queueShoot() {
-      shootPulse = true;
+      shotQueued = true;
     },
     addMouseDX(dx) {
-      mouseDX += dx;
+      mouseDelta += dx;
     },
   };
+  return core;
 }
 
-function clearHeld(input) {
+function releaseAll(input) {
   for (const action of Object.keys(input.held)) input.held[action] = false;
 }
 
@@ -96,7 +115,7 @@ export function createInput(canvas) {
   window.addEventListener('keydown', (event) => {
     const action = KEYMAP[event.code];
     if (action === undefined) return;
-    if (!input.held[action]) input.edge[action] = true;
+    if (!input.held[action]) input.press(action);
     input.held[action] = true;
     if (action === 'jump' || action === 'pause') event.preventDefault();
   });
@@ -112,7 +131,7 @@ export function createInput(canvas) {
   });
   // Losing the window must release every key, or Rico keeps driving
   // forever when the player alt-tabs away mid-chase.
-  window.addEventListener('blur', () => clearHeld(input));
+  window.addEventListener('blur', () => releaseAll(input));
   return input;
 }
 
@@ -126,8 +145,8 @@ export function createScriptedInput() {
     input.held[action] = value;
   };
   input.clear = () => {
-    clearHeld(input);
-    for (const action of Object.keys(input.edge)) input.edge[action] = false;
+    releaseAll(input);
+    input.resetEdges();
   };
   return input;
 }

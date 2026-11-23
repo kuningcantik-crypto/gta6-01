@@ -5,32 +5,45 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const portIndex = process.argv.indexOf('--port');
-const port = portIndex >= 0 ? Number(process.argv[portIndex + 1]) : 8080;
+// [extension, Content-Type] — everything the game folder can serve.
+const MIME_ROWS = [
+  ['.html', 'text/html'],
+  ['.js', 'text/javascript'],
+  ['.mjs', 'text/javascript'],
+  ['.css', 'text/css'],
+  ['.json', 'application/json'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.png', 'image/png'],
+];
+const MIME = Object.fromEntries(MIME_ROWS);
 
-const MIME = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-};
+const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
+
+function portFromArgs() {
+  const at = process.argv.indexOf('--port');
+  const value = at >= 0 ? Number(process.argv[at + 1]) : NaN;
+  return Number.isFinite(value) && value > 0 ? value : 8080;
+}
 
 function mimeFor(file) {
-  const ext = file.slice(file.lastIndexOf('.'));
+  const dot = file.lastIndexOf('.');
+  const ext = dot >= 0 ? file.slice(dot) : '';
   return MIME[ext] || 'application/octet-stream';
+}
+
+function safeJoin(pathname) {
+  const decoded = decodeURIComponent(pathname);
+  const rel = decoded.endsWith('/') ? `${decoded}index.html` : decoded;
+  // join() normalises '..' away, and the startsWith(root) check below
+  // turns any escape attempt into a 403 instead of a file leak.
+  return join(root, rel);
 }
 
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', 'http://localhost');
-    let path = decodeURIComponent(url.pathname);
-    if (path.endsWith('/')) path += 'index.html';
-    const file = join(root, path);
+    const file = safeJoin(url.pathname);
     if (!file.startsWith(root)) {
       res.writeHead(403);
       res.end('Forbidden');
@@ -46,6 +59,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
+const port = portFromArgs();
 server.listen(port, () => {
   console.log(`Solmar Bay at http://localhost:${port}/`);
 });

@@ -3,13 +3,21 @@
 // pickup chime, a mission sting, rain on the roof, and a soft sunset pad
 // under the title screen. One chord per radio station — switching station
 // retunes the pad.
-const RADIO_CHORDS = [
-  [220, 277.18, 329.63],
-  [196, 246.94, 293.66],
-  [174.61, 220, 261.63],
-  [146.83, 185, 220],
-  [164.81, 207.65, 246.94],
+const NOTE_FREQ = {
+  A3: 220, 'C#4': 277.18, E4: 329.63,
+  G3: 196, B3: 246.94, D4: 293.66,
+  F3: 174.61, C4: 261.63,
+  D3: 146.83, 'F#3': 185,
+  E3: 164.81, 'G#3': 207.65,
+};
+const CHORD_NAMES = [
+  ['A3', 'C#4', 'E4'],
+  ['G3', 'B3', 'D4'],
+  ['F3', 'A3', 'C4'],
+  ['D3', 'F#3', 'A3'],
+  ['E3', 'G#3', 'B3'],
 ];
+const RADIO_CHORDS = CHORD_NAMES.map((names) => names.map((n) => NOTE_FREQ[n]));
 
 export function createAudio() {
   let ctx = null;
@@ -63,6 +71,8 @@ export function createAudio() {
 
   function tunePad(freqs) {
     padNotes = [];
+    // One shared gain bus for the three pad voices, so a volume change
+    // (or a station switch) moves the whole chord at once.
     const bus = ctx.createGain();
     bus.gain.value = 0.035 * volume;
     bus.connect(ctx.destination);
@@ -108,38 +118,38 @@ export function createAudio() {
   // One-shot effects, as small scripts: each entry names its instrument
   // (tone or noise), the delay before it fires, and the arguments.
   // A single runner plays every script.
+  // {play, at, args}
   const SOUND_SCRIPTS = {
-    shot: [['noise', 0, [0.12, 0.3]]],
+    shot: [{play: 'noise', at: 0, args: [0.12, 0.3]}],
     punch: [
-      ['noise', 0, [0.08, 0.2]],
-      ['tone', 0, [120, 0.08, 'square', 0.1]],
+      {play: 'noise', at: 0, args: [0.08, 0.2]},
+      {play: 'tone', at: 0, args: [120, 0.08, 'square', 0.1]},
     ],
     pickup: [
-      ['tone', 0, [880, 0.12, 'sine', 0.18]],
-      ['tone', 90, [1320, 0.18, 'sine', 0.15]],
+      {play: 'tone', at: 0, args: [880, 0.12, 'sine', 0.18]},
+      {play: 'tone', at: 90, args: [1320, 0.18, 'sine', 0.15]},
     ],
     mission: [
-      ['tone', 0, [523, 0.25, 'triangle', 0.16]],
-      ['tone', 110, [659, 0.25, 'triangle', 0.16]],
-      ['tone', 220, [784, 0.25, 'triangle', 0.16]],
+      {play: 'tone', at: 0, args: [523, 0.25, 'triangle', 0.16]},
+      {play: 'tone', at: 110, args: [659, 0.25, 'triangle', 0.16]},
+      {play: 'tone', at: 220, args: [784, 0.25, 'triangle', 0.16]},
     ],
-    crash: [['noise', 0, [0.25, 0.25]]],
-    click: [['tone', 0, [600, 0.05, 'square', 0.08]]],
+    crash: [{play: 'noise', at: 0, args: [0.25, 0.25]}],
+    click: [{play: 'tone', at: 0, args: [600, 0.05, 'square', 0.08]}],
     horn: [
-      ['tone', 0, [370, 0.18, 'sawtooth', 0.1]],
-      ['tone', 0, [466, 0.18, 'sawtooth', 0.1]],
+      {play: 'tone', at: 0, args: [370, 0.18, 'sawtooth', 0.1]},
+      {play: 'tone', at: 0, args: [466, 0.18, 'sawtooth', 0.1]},
     ],
   };
 
   function runStep(step) {
-    const [kind, , args] = step;
-    if (kind === 'noise') playNoise(args[0], args[1]);
-    else playTone(args[0], args[1], args[2], args[3]);
+    if (step.play === 'noise') playNoise(step.args[0], step.args[1]);
+    else playTone(step.args[0], step.args[1], step.args[2], step.args[3]);
   }
 
   function runScript(script) {
     for (const step of script) {
-      if (step[1] > 0) setTimeout(() => runStep(step), step[1]);
+      if (step.at > 0) setTimeout(() => runStep(step), step.at);
       else runStep(step);
     }
   }
