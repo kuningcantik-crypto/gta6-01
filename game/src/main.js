@@ -47,11 +47,11 @@ let lowEffects = false;
 let slowTime = 0;
 let lastWall = performance.now();
 
-function announce(message) {
+function setStatus(message) {
   status.textContent = message;
 }
 
-function beginGame(fresh) {
+function startGame(fresh) {
   if (fresh) {
     resetInPlace(state, seed);
     saveGame(state);
@@ -62,10 +62,10 @@ function beginGame(fresh) {
   audio.unlock();
   audio.setRadio(state.player.radioStation || 0);
   hud.showMessage(fresh ? 'New game. Lucia is waiting — find a car.' : 'Welcome back to Solmar Bay.', 4);
-  announce(`Playing. ${STORY_INTRO}`);
+  setStatus(`Playing. ${STORY_INTRO}`);
 }
 
-function wakeAtHospital() {
+function respawnAtHospital() {
   const p = state.player;
   if (p.car) {
     p.car.kind = 'parked';
@@ -87,17 +87,17 @@ function wakeAtHospital() {
   hud.showMessage('You woke up at St. Palma Hospital. The city is still yours.', 4);
 }
 
-function applySettings() {
+function pushSettings() {
   audio.setVolume(settings.volume);
   if (settings.quality === 'low') renderer.setQuality('low');
 }
 
 const hud = createHud(state, {
-  onNewGame: () => beginGame(true),
-  onContinue: () => beginGame(false),
+  onNewGame: () => startGame(true),
+  onContinue: () => startGame(false),
   onResume: () => { screen = 'play'; },
   onRestart: () => {
-    wakeAtHospital();
+    respawnAtHospital();
     screen = 'play';
   },
   onTitle: () => { screen = 'title'; },
@@ -117,7 +117,7 @@ const hud = createHud(state, {
     } else {
       settings = setSetting(settings, key, !settings[key]);
     }
-    applySettings();
+    pushSettings();
     hud.setSettings(settings);
   },
   onGarageBuy: (kind) => {
@@ -125,7 +125,7 @@ const hud = createHud(state, {
     saveGame(state);
   },
 });
-applySettings();
+pushSettings();
 hud.setSettings(settings);
 
 createTouchControls(input, {
@@ -135,7 +135,7 @@ createTouchControls(input, {
 // Overlay toggles live here, not in stepWorld: the world is frozen while
 // an overlay is open, so stepWorld would never read the key that is
 // supposed to close it. Only while playing, not on the title screen.
-function readOverlayKeys() {
+function pollOverlayKeys() {
   if (input.wasPressed('missions')) state.missionsOpen = !state.missionsOpen;
   if (input.wasPressed('settings')) state.settingsOpen = !state.settingsOpen;
   if (input.wasPressed('photo') && screen === 'play') {
@@ -153,7 +153,7 @@ function readOverlayKeys() {
 
 // The camera follows the player's heading, nudged by mouse movement,
 // and only turns while the player is actually moving.
-function steerCamera(frameDt) {
+function followCamera(frameDt) {
   const invert = settings.invertCamera ? -1 : 1;
   cameraYaw -= input.takeMouseDX() * 0.0035 * invert;
   let diff = state.player.angle - cameraYaw;
@@ -168,10 +168,10 @@ function steerCamera(frameDt) {
 function settleScreen() {
   if (state.wasted) {
     screen = 'wasted';
-    announce('Wasted.');
+    setStatus('Wasted.');
   } else if (state.busted) {
     screen = 'busted';
-    announce('Busted.');
+    setStatus('Busted.');
   } else if (state.allMissionsDone && !completeShown) {
     completeShown = true;
     screen = 'complete';
@@ -195,8 +195,8 @@ function playFrame(frameDt) {
     hud.setPhotoMode(false);
   }
   if (screen === 'play') {
-    readOverlayKeys();
-    steerCamera(frameDt);
+    pollOverlayKeys();
+    followCamera(frameDt);
     // Garage, job-list and settings overlays freeze the world while open.
     if (!state.garageOpen && !state.missionsOpen && !state.settingsOpen) {
       stepAccumulator += frameDt;
@@ -228,7 +228,7 @@ function playFrame(frameDt) {
 // ?perf=off disables it (used by the FPS harness for raw comparisons).
 // Wall-clock time, not the capped frame delta: at 1 FPS the capped
 // delta would take 16 real seconds to notice 4 slow seconds.
-function watchPerformance(now) {
+function checkPerformance(now) {
   if (lowEffects || screen !== 'play' || params.get('perf') === 'off') {
     lastWall = now;
     return;
@@ -250,7 +250,7 @@ function runGame() {
     const frameDt = Math.min(0.25, (now - lastFrame) / 1000);
     lastFrame = now;
     playFrame(frameDt);
-    watchPerformance(now);
+    checkPerformance(now);
   }
   requestAnimationFrame(frame);
 }
@@ -352,7 +352,7 @@ function buildTestHandle() {
       resetInPlace(state, seed);
     },
     start(fresh) {
-      beginGame(fresh);
+      startGame(fresh);
     },
   };
 }

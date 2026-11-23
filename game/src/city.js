@@ -227,28 +227,30 @@ function growPalms(scene, rng) {
   const trunkMat = new THREE.MeshLambertMaterial({color: 0x7a5a3a});
   const leafMat = new THREE.MeshLambertMaterial({color: 0x3f8a4a, side: THREE.DoubleSide});
   const spots = [];
-  // Deret pantai.
-  for (let x = -170; x <= 170; x += 18) spots.push([x + (rng.next() - 0.5) * 8, 186 + rng.next() * 6]);
-  // Palem pinggir jalan.
+  // Beach row, one palm every 18 m with a jittered spot.
+  for (let x = -170; x <= 170; x += 18) {
+    spots.push([x + (rng.next() - 0.5) * 8, 186 + rng.next() * 6]);
+  }
+  // Roadside palms, one side of a random road each.
   for (let i = 0; i < 26; i += 1) {
     const road = rng.pick(CITY.roads);
-    spots.push([road + (rng.next() < 0.5 ? -9 : 9), -170 + rng.next() * 340]);
+    const side = rng.next() < 0.5 ? -9 : 9;
+    spots.push([road + side, -170 + rng.next() * 340]);
   }
-  // Satu batang instanced dan satu set daun instanced untuk semua palem,
-  // bukan tujuh mesh per pohon.
+  // One instanced trunk and one instanced leaf set for every palm,
+  // not seven meshes per tree.
   const trunkMatrices = [];
   const leafMatrices = [];
-  for (let s = 0; s < spots.length; s += 1) {
-    const [x, z] = spots[s];
+  for (const [x, z] of spots) {
     const yaw = rng.next() * Math.PI * 2;
     const trunk = new THREE.Matrix4().makeRotationY(yaw);
     trunk.setPosition(x, 2.5, z);
     trunkMatrices.push(trunk);
     for (let i = 0; i < 6; i += 1) {
       const a = (i / 6) * Math.PI * 2;
-      // Orientasi dunia daun adalah yaw palem dikali kemiringan daun:
-      // Ry(yaw) * Ry(-a) * Rx(0.5), alias Euler(0.5, yaw - a, 0, 'YXZ').
-      // Offset daun berputar dengan cara yang sama: sudut (a - yaw).
+      // The leaf's world orientation is the palm yaw times the leaf
+      // tilt: Ry(yaw) * Ry(-a) * Rx(0.5), alias Euler(0.5, yaw - a, 0, 'YXZ').
+      // The leaf offset rotates the same way: angle (a - yaw).
       const leafQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.5, yaw - a, 0, 'YXZ'));
       leafMatrices.push(new THREE.Matrix4().compose(
         new THREE.Vector3(x + Math.cos(a - yaw) * 1.4, 5.2, z + Math.sin(a - yaw) * 1.4),
@@ -276,8 +278,8 @@ function lineLamps(scene) {
   scatter(scene, new THREE.SphereGeometry(0.35, 8, 6), bulbMat, bulbMatrices);
 }
 
-// Payung pantai: kerucut warna-warni di atas tiang sepanjang pasir,
-// murni dekorasi — tidak bergerak dan tidak bertabrakan.
+// Beach umbrellas: colourful cones on poles along the sand, pure
+// decoration — they never move and never collide.
 function shadeBeach(scene) {
   const umbrellaColors = [0xff5fa2, 0xffd76e, 0x7dd8ff, 0xff7a2b];
   for (let i = 0; i < 4; i += 1) {
@@ -298,7 +300,7 @@ function shadeBeach(scene) {
 }
 
 function makeShore(scene, rng) {
-  // Hamparan pasir dan laut di baliknya.
+  // Sand sheet and the sea behind it.
   const sand = groundSheet(CITY.half * 2 + 60, 30, BEACH_COLOR);
   sand.position.set(0, 0.02, CITY.beachZ + 8);
   scene.add(sand);
@@ -311,7 +313,7 @@ function makeShore(scene, rng) {
   ocean.name = 'ocean';
   scene.add(ocean);
   shadeBeach(scene);
-  // Dermaga: dek kayu di atas tiang, menjorok ke laut di x = 0.
+  // The pier: a wooden deck on posts, reaching out to sea at x = 0.
   const deck = solidBox(8, 0.6, 34, 0x8a6b4a);
   deck.position.set(0, 0.8, 196);
   scene.add(deck);
@@ -322,16 +324,15 @@ function makeShore(scene, rng) {
       scene.add(post);
     }
   }
-  // Perahu yang berlayar di teluk: tiap perahu adalah grup yang
-  // digerakkan renderer sepanjang jalurnya sambil bergoyang pelan.
-  // Jalur duduk di balik dermaga supaya perahu tidak menyeberang pantai.
+  // Boats sailing the bay: each boat is a group the renderer moves
+  // along its lane while it rocks gently. The lanes sit behind the
+  // pier so no boat ever crosses the beach.
   const boats = [
     [0, 232, 2.2, 0, 0xe8e8e8],
     [1, 242, 1.6, 90, 0xff8a5e],
     [2, 252, 2.8, 170, 0x7dd8ff],
   ];
-  for (let b = 0; b < boats.length; b += 1) {
-    const [i, lane, speed, phase, color] = boats[b];
+  for (const [i, lane, speed, phase, color] of boats) {
     const boat = new THREE.Group();
     boat.name = 'boat-' + i;
     boat.userData = {lane, speed, phase};
@@ -346,7 +347,6 @@ function makeShore(scene, rng) {
   }
 }
 
-// Bianglala dermaga: dua kaki, pelek berjari-jari, dan delapan kabin
 // yang menggantung di pelek. Grup rotor diputar di render.js; kabin
 // berputar berlawanan di sana supaya tetap tegak.
 function spinWheel(scene) {

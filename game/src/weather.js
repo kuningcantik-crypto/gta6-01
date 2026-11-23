@@ -19,11 +19,11 @@ const DAY_PHASES = [
 ];
 
 export function weatherForHour(hour) {
-  let found = DAY_PHASES[0].kind;
-  for (let i = 0; i < DAY_PHASES.length; i += 1) {
-    if (hour >= DAY_PHASES[i].start) found = DAY_PHASES[i].kind;
+  let current = DAY_PHASES[0].kind;
+  for (const phase of DAY_PHASES) {
+    if (hour >= phase.start) current = phase.kind;
   }
-  return found;
+  return current;
 }
 
 export function createWeather() {
@@ -57,7 +57,7 @@ function clamp01(v) {
   return v;
 }
 
-function easeToward(now, goal, dt) {
+function driftToward(now, goal, dt) {
   const step = goal > now ? dt / 4 : dt / 8;
   return now + Math.max(-step, Math.min(step, goal - now));
 }
@@ -90,7 +90,7 @@ export function tickWeather(weather, dt, clockMinutes, rng) {
   }
   // Lalu hujan: deras naik cepat, reda pelan.
   const goal = RAIN_TARGET[weather.kind];
-  weather.rain = easeToward(weather.rain, goal, dt);
+  weather.rain = driftToward(weather.rain, goal, dt);
   // Jalan basah ikut: cepat basah saat hujan, kering pelan setelahnya.
   const drying = goal > 0 ? dt / 20 : -dt / 40;
   weather.wetness = clamp01(weather.wetness + drying);

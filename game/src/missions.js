@@ -18,56 +18,54 @@ export function currentStep(state) {
   return leg === undefined ? null : leg;
 }
 
-function spotOf(leg, index) {
-  const spots = leg.spots || [];
-  const spot = spots[index || 0];
-  return spot === undefined ? null : spot;
-}
-
-function gateOf(leg, index) {
-  const gates = leg.checkpoints || [];
-  const gate = gates[index || 0];
-  return gate === undefined ? null : gate;
+function nthItem(list, index) {
+  const items = list || [];
+  const item = items[index || 0];
+  return item === undefined ? null : item;
 }
 
 // Where the beacon should point for the leg in progress, or nothing
 // when the leg has no place on the map. Collect legs point at the next
 // uncollected spot, race legs at the next gate, ram legs follow the
 // courier car, and every other kind points at its own position.
+const TARGET_FOR = {
+  collect(state, leg) {
+    const spot = nthItem(leg.spots, state.missionCollected);
+    return spot === null ? null : {x: spot.x, z: spot.z, label: leg.label};
+  },
+  race(state, leg) {
+    const gate = nthItem(leg.checkpoints, state.raceIndex);
+    return gate === null ? null : {x: gate.x, z: gate.z, label: leg.label};
+  },
+  ram(state, leg) {
+    if (!state.targetCar) return null;
+    return {x: state.targetCar.x, z: state.targetCar.z, label: leg.label};
+  },
+};
+
 export function stepTarget(state) {
   const leg = currentStep(state);
   if (leg === null) return null;
-  switch (leg.kind) {
-    case 'collect': {
-      const spot = spotOf(leg, state.missionCollected);
-      return spot === null ? null : {x: spot.x, z: spot.z, label: leg.label};
-    }
-    case 'race': {
-      const gate = gateOf(leg, state.raceIndex);
-      return gate === null ? null : {x: gate.x, z: gate.z, label: leg.label};
-    }
-    case 'ram': {
-      if (!state.targetCar) return null;
-      return {x: state.targetCar.x, z: state.targetCar.z, label: leg.label};
-    }
-    default: {
-      if (!leg.pos) return null;
-      return {x: leg.pos.x, z: leg.pos.z, label: leg.label};
-    }
-  }
+  const resolve = TARGET_FOR[leg.kind];
+  if (resolve) return resolve(state, leg);
+  if (!leg.pos) return null;
+  return {x: leg.pos.x, z: leg.pos.z, label: leg.label};
 }
 
 function progressText(state, leg) {
   if (leg.kind === 'collect') {
-    const shown = leg.label.replace(/\(\d+\/\d+\)/, '(' + (state.missionCollected || 0) + '/' + leg.count + ')');
-    return shown;
+    const total = leg.count;
+    const done = state.missionCollected || 0;
+    return leg.label.replace(/\(\d+\/\d+\)/, '(' + done + '/' + total + ')');
   }
   if (leg.kind === 'race') {
     const total = (leg.checkpoints || []).length;
-    return 'Race the Neon circuit (' + (state.raceIndex || 0) + '/' + total + ' gates)';
+    const done = state.raceIndex || 0;
+    return 'Race the Neon circuit (' + done + '/' + total + ' gates)';
   }
   if (leg.kind === 'eliminate') {
-    return 'Disable police cars (' + (state.eliminated || 0) + '/' + leg.count + ')';
+    const done = state.eliminated || 0;
+    return 'Disable police cars (' + done + '/' + leg.count + ')';
   }
   return leg.label;
 }
@@ -100,7 +98,7 @@ export function sayLine(state, text, name, role) {
   state.dialogue = {name: name || 'Lucia', role: role || 'Fixer', text, timer: 7};
 }
 
-function clearLegCounters(state) {
+function zeroLegCounters(state) {
   state.missionCollected = 0;
   state.missionHold = 0;
   state.raceIndex = 0;
@@ -110,7 +108,7 @@ function clearLegCounters(state) {
 // Called when a leg (re)starts: per-leg counters and the clock reset.
 export function startStep(state) {
   const leg = currentStep(state);
-  clearLegCounters(state);
+  zeroLegCounters(state);
   state.missionTimer = leg !== null && leg.seconds ? leg.seconds : 0;
   if (leg !== null && leg.kind === 'ram') state.targetCar = null;
   if (leg !== null && leg.wantedOnStart) {
@@ -141,7 +139,7 @@ export function advanceMission(state) {
   const job = currentMission(state);
   if (job === null) return null;
   state.missionStep += 1;
-  clearLegCounters(state);
+  zeroLegCounters(state);
   if (state.missionStep < job.steps.length) {
     startStep(state);
     return 'step';

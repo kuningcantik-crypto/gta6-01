@@ -84,18 +84,17 @@ export const RESPECT_RANKS = [
   {rp: 2500, name: 'KINGPIN'},
   {rp: 5000, name: 'LEGEND OF SOLMAR'},
 ];
+
 export function rankFor(rp) {
   let current = RESPECT_RANKS[0];
   let nextOne = null;
-  let i = 0;
-  while (i < RESPECT_RANKS.length) {
+  for (let i = 0; i < RESPECT_RANKS.length; i += 1) {
     const entry = RESPECT_RANKS[i];
     if (rp < entry.rp) {
       nextOne = entry;
       break;
     }
     current = entry;
-    i += 1;
   }
   return {rank: current, next: nextOne};
 }
@@ -163,9 +162,12 @@ export const DISTRICTS = [
   {name: 'PALMA HEIGHTS', road: 'Palm Court', x0: -52, z0: -182, x1: 52, z1: -52},
   {name: 'CENTRAL PLAZA', road: 'Plaza Mayor', x0: -52, z0: -52, x1: 52, z1: 52},
 ];
+
 export function districtAt(x, z) {
-  const zone = DISTRICTS.find((d) => x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1);
-  return zone || DISTRICTS[DISTRICTS.length - 1];
+  for (const zone of DISTRICTS) {
+    if (x >= zone.x0 && x <= zone.x1 && z >= zone.z0 && z <= zone.z1) return zone;
+  }
+  return DISTRICTS[DISTRICTS.length - 1];
 }
 
 // The heat word the HUD shows for a district's trouble level.
@@ -213,117 +215,117 @@ export const CREW = [
 // timed hold (hold), a race through gates against the clock (race), a
 // car to smash until it stops (ram), police cars to disable (eliminate),
 // or a place to reach before the clock runs out (timed).
-function job(id, title, giver, chapter, brief, reward, rp, line, steps) {
+function makeJob(id, title, giver, chapter, brief, reward, rp, line, steps) {
   return {id, title, giver, chapter, brief, reward, rp, dialogue: [line], steps};
 }
-// Steps as compact calls: move(kind, label, place, extra) expands into
+// Steps as compact calls: leg(kind, label, place, extra) expands into
 // the step object the mission machine reads. place is a coordinate pair,
 // or null for steps with no place on the map (anyCar, wanted, eliminate).
 function at(x, z) { return {x, z}; }
-function move(kind, label, place, extra = {}) {
-  const built = {kind, label};
-  for (const key of Object.keys(extra)) built[key] = extra[key];
+function leg(kind, label, place, extra = {}) {
+  const built = {kind, label, ...extra};
   if (place) built.pos = place;
   return built;
 }
+
 export const MISSIONS = [
-  job('welcome', 'Welcome to Solmar', 'Lucia', 'CH.1',
+  makeJob('welcome', 'Welcome to Solmar', 'Lucia', 'CH.1',
     'Lucia needs wheels. Steal a car and drive to the Neon Pier to meet her.',
     150, 150,
     'Rico, welcome home. First rule of Solmar: wheels before words. Steal a car and meet me at the Neon Pier.',
     [
-      move('goto', 'Steal a car (walk up to one, press E)', null, {anyCar: true}),
-      move('goto', 'Drive to the Neon Pier', at(0, 196)),
+      leg('goto', 'Steal a car (walk up to one, press E)', null, {anyCar: true}),
+      leg('goto', 'Drive to the Neon Pier', at(0, 196)),
     ]),
-  job('packages', 'Package Run', 'Lucia', 'CH.1',
+  makeJob('packages', 'Package Run', 'Lucia', 'CH.1',
     'Three packages are stashed around the city. Collect them all — and stay out of trouble.',
     250, 150,
     'Three packages, three corners of the city. No noise, no heat. Bring them back and the money is yours.',
     [
-      move('collect', 'Collect the packages (0/3)', at(-130, 26), {count: 3,
+      leg('collect', 'Collect the packages (0/3)', at(-130, 26), {count: 3,
         spots: [at(-130, 26), at(78, -78), at(130, 78)]}),
     ]),
-  job('getaway', 'Getaway Driver', 'Mira', 'CH.2',
+  makeJob('getaway', 'Getaway Driver', 'Mira', 'CH.2',
     'The cops are onto you. Earn heat, then lose them at the safehouse.',
     300, 200,
     'You want to drive for us? Prove it. Get the cops on your tail — then shake them at the safehouse.',
     [
-      move('wanted', 'Get the cops on you (2 stars)', null, {stars: 2}),
-      move('goto', 'Lose the heat at the safehouse', at(-130, -130)),
+      leg('wanted', 'Get the cops on you (2 stars)', null, {stars: 2}),
+      leg('goto', 'Lose the heat at the safehouse', at(-130, -130)),
     ]),
-  job('taxi', 'Taxi Hustle', 'Lio', 'CH.2',
+  makeJob('taxi', 'Taxi Hustle', 'Lio', 'CH.2',
     'A fare is waiting at the plaza. Pick them up, drop them at the airport hotel.',
     200, 150,
     'Easy money, Rico. A fare at the plaza, hotel on the north side. Drive like you own the road — because soon you will.',
     [
-      move('pickup', 'Pick up the fare at the plaza', at(0, 0)),
-      move('deliver', 'Drop the fare at the hotel', at(130, -78)),
+      leg('pickup', 'Pick up the fare at the plaza', at(0, 0)),
+      leg('deliver', 'Drop the fare at the hotel', at(130, -78)),
     ]),
-  job('bigscore', 'The Big Score', 'Lucia', 'CH.3',
+  makeJob('bigscore', 'The Big Score', 'Lucia', 'CH.3',
     'Hit the Solmar Bank vault, grab the cash, and vanish at the safehouse. The whole force will come.',
     800, 400,
     'The bank, Rico. Five minutes inside, then we vanish. The whole force will come — so drive like your life depends on it.',
     [
-      move('goto', 'Reach the Solmar Bank', at(26, -26)),
-      move('hold', 'Crack the vault — hold position', at(26, -26), {seconds: 5}),
-      move('goto', 'Escape to the safehouse', at(-130, -130)),
+      leg('goto', 'Reach the Solmar Bank', at(26, -26)),
+      leg('hold', 'Crack the vault — hold position', at(26, -26), {seconds: 5}),
+      leg('goto', 'Escape to the safehouse', at(-130, -130)),
     ]),
-  job('streetrace', 'Neon Nights Street Race', 'Mira', 'CH.3',
+  makeJob('streetrace', 'Neon Nights Street Race', 'Mira', 'CH.3',
     'Five checkpoints, one clock. Beat the best time on the Neon circuit and take the pot.',
     450, 300,
     'Street race, midnight, five gates. The pot is fat and the cops love a race. Beat the clock and the money is yours.',
     [
-      move('race', 'Race the Neon circuit (0/5 gates)', null, {seconds: 100,
+      leg('race', 'Race the Neon circuit (0/5 gates)', null, {seconds: 100,
         checkpoints: [at(0, 104), at(104, 104), at(104, -104), at(-104, -104), at(-104, 104)]}),
     ]),
-  job('ramraid', 'Ram the Courier', 'Nacho', 'CH.4',
+  makeJob('ramraid', 'Ram the Courier', 'Nacho', 'CH.4',
     'A courier is moving product across town in a white Comet. Ram it until it stops — then take the cargo.',
     400, 300,
     'White Comet, north side, moving fast. Put it in a wall, Rico. Ram it till it stops — the cargo is worth the noise.',
     [
-      move('ram', 'Ram the courier car until it stops', at(104, 52)),
+      leg('ram', 'Ram the courier car until it stops', at(104, 52)),
     ]),
-  job('loseheat', 'Lose the Heat', 'Kiki', 'CH.4',
+  makeJob('loseheat', 'Lose the Heat', 'Kiki', 'CH.4',
     'Three stars and a helicopter overhead. Get to the beach hideout before the net closes.',
     350, 250,
     'Air One has you in the light, Rico. Three stars is a net, not a chase. Get to the beach hideout — fast, before it closes.',
     [
-      move('wanted', 'Draw the heat (3 stars)', null, {stars: 3}),
-      move('timed', 'Reach the beach hideout', at(-156, 156), {seconds: 45}),
+      leg('wanted', 'Draw the heat (3 stars)', null, {stars: 3}),
+      leg('timed', 'Reach the beach hideout', at(-156, 156), {seconds: 45}),
     ]),
-  job('shootout', 'Pier Shootout', 'Lucia', 'CH.5',
+  makeJob('shootout', 'Pier Shootout', 'Lucia', 'CH.5',
     'The pier is crawling with cruisers. Disable three police cars — however you like — and own the waterfront.',
     500, 350,
     'They took the pier, Rico. Take it back. Three cruisers disabled and the waterfront is ours again.',
     [
-      move('eliminate', 'Disable police cars (0/3)', null, {count: 3}),
+      leg('eliminate', 'Disable police cars (0/3)', null, {count: 3}),
     ]),
-  job('delivery', 'Midnight Delivery', 'Tía Rosa', 'CH.5',
+  makeJob('delivery', 'Midnight Delivery', 'Tía Rosa', 'CH.5',
     'A package for the hotel, and the clock is the boss. Pick it up at the plaza and deliver in time.',
     400, 250,
     'Mijo, the hotel waits for no one. Plaza pickup, hotel drop, seventy seconds. Drive like the package is your heart.',
     [
-      move('pickup', 'Pick up the package at the plaza', at(0, 0)),
-      move('timed', 'Deliver to the Hotel Palma', at(130, -78), {seconds: 70}),
+      leg('pickup', 'Pick up the package at the plaza', at(0, 0)),
+      leg('timed', 'Deliver to the Hotel Palma', at(130, -78), {seconds: 70}),
     ]),
-  job('escort', "Lucia's Run", 'Lucia', 'CH.6',
+  makeJob('escort', "Lucia's Run", 'Lucia', 'CH.6',
     'Lucia needs an escort to the pier — and the cops know it. Pick her up, keep her safe, get her there in time.',
     550, 400,
     'I need wheels and a guardian, Rico. Pick me up at the plaza, get me to the pier in ninety seconds — the cops know my name.',
     [
-      move('pickup', 'Pick up Lucia at the plaza', at(0, 0)),
-      move('timed', 'Escort Lucia to the Neon Pier', at(0, 196), {seconds: 90, wantedOnStart: 2}),
+      leg('pickup', 'Pick up Lucia at the plaza', at(0, 0)),
+      leg('timed', 'Escort Lucia to the Neon Pier', at(0, 196), {seconds: 90, wantedOnStart: 2}),
     ]),
-  job('goldrush', 'The Gold Rush', 'Lucia', 'CH.6',
+  makeJob('goldrush', 'The Gold Rush', 'Lucia', 'CH.6',
     'The final job: crack the bank, grab three gold caches across the city, and vanish at the pier. Everything is on the line.',
     1200, 600,
     'This is the one, Rico. Bank, three caches, pier. The whole city will be watching — make it count.',
     [
-      move('goto', 'Reach the Solmar Bank', at(26, -26)),
-      move('hold', 'Crack the vault — hold position', at(26, -26), {seconds: 5}),
-      move('collect', 'Grab the gold caches (0/3)', at(-130, 26), {count: 3,
+      leg('goto', 'Reach the Solmar Bank', at(26, -26)),
+      leg('hold', 'Crack the vault — hold position', at(26, -26), {seconds: 5}),
+      leg('collect', 'Grab the gold caches (0/3)', at(-130, 26), {count: 3,
         spots: [at(-130, 26), at(78, -78), at(130, 78)]}),
-      move('goto', 'Vanish at the Neon Pier', at(0, 196)),
+      leg('goto', 'Vanish at the Neon Pier', at(0, 196)),
     ]),
 ];
 

@@ -7,8 +7,8 @@ const CHROME = process.env.CHROME_BIN || 'google-chrome';
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function flagList(port, profile, width, height, mobile) {
-  const pairs = [
+function chromeFlags(port, profile, width, height, mobile) {
+  const flags = [
     ['--headless', 'new'],
     ['--remote-debugging-port', String(port)],
     ['--user-data-dir', profile],
@@ -23,13 +23,9 @@ function flagList(port, profile, width, height, mobile) {
     ['--hide-scrollbars', null],
   ];
   if (mobile) {
-    pairs.push(['--user-agent', 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0 Mobile Safari/537.36']);
+    flags.push(['--user-agent', 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0 Mobile Safari/537.36']);
   }
-  const out = [];
-  for (const [name, value] of pairs) {
-    out.push(value === null ? name : `${name}=${value}`);
-  }
-  return out;
+  return flags.map(([name, value]) => (value === null ? name : `${name}=${value}`));
 }
 
 // Each launch gets a fresh debugging port and profile, so a lingering
@@ -37,7 +33,7 @@ function flagList(port, profile, width, height, mobile) {
 export async function launchChrome(width, height, mobile) {
   const port = 9400 + Math.floor(Math.random() * 500);
   const profile = `/tmp/chrome-profile-${port}`;
-  const child = spawn(CHROME, flagList(port, profile, width, height, mobile), { stdio: 'ignore' });
+  const child = spawn(CHROME, chromeFlags(port, profile, width, height, mobile), {stdio: 'ignore'});
   let up = false;
   for (let attempt = 0; attempt < 60 && !up; attempt += 1) {
     try {
@@ -49,7 +45,7 @@ export async function launchChrome(width, height, mobile) {
     if (!up) await sleep(250);
   }
   if (!up) throw new Error('Chrome did not start');
-  return { child, port };
+  return {child, port};
 }
 
 export async function connect(port) {
@@ -80,10 +76,10 @@ export async function connect(port) {
       pending.delete(id);
       reject(new Error(`CDP timeout: ${method}`));
     }, 30000);
-    pending.set(id, { resolve, reject, timer });
-    ws.send(JSON.stringify({ id, method, params }));
+    pending.set(id, {resolve, reject, timer});
+    ws.send(JSON.stringify({id, method, params}));
   });
-  return { ws, send, events };
+  return {ws, send, events};
 }
 
 export async function newTab(send, url, width, height, mobile) {
@@ -91,17 +87,17 @@ export async function newTab(send, url, width, height, mobile) {
   await send('Runtime.enable');
   await send('Log.enable');
   if (mobile) {
-    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: true });
-    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await send('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 2, mobile: true});
+    await send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 5});
   } else {
-    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await send('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 1, mobile: false});
   }
-  await send('Page.navigate', { url });
+  await send('Page.navigate', {url});
 }
 
 export async function evalJs(send, expression, awaitPromise = false) {
-  const res = await send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true });
-  if (res.result?.exceptionDetails) return { error: res.result.exceptionDetails };
+  const res = await send('Runtime.evaluate', {expression, awaitPromise, returnByValue: true});
+  if (res.result?.exceptionDetails) return {error: res.result.exceptionDetails};
   return res.result?.result?.value;
 }
 
@@ -141,11 +137,11 @@ function virtualKey(k) {
 }
 
 export async function keyDown(send, code, k) {
-  await send('Input.dispatchKeyEvent', { type: 'keyDown', code, key: k, windowsVirtualKeyCode: virtualKey(k) });
+  await send('Input.dispatchKeyEvent', {type: 'keyDown', code, key: k, windowsVirtualKeyCode: virtualKey(k)});
 }
 
 export async function keyUp(send, code, k) {
-  await send('Input.dispatchKeyEvent', { type: 'keyUp', code, key: k, windowsVirtualKeyCode: virtualKey(k) });
+  await send('Input.dispatchKeyEvent', {type: 'keyUp', code, key: k, windowsVirtualKeyCode: virtualKey(k)});
 }
 
 export async function tapKey(send, code, k) {
@@ -155,20 +151,20 @@ export async function tapKey(send, code, k) {
 }
 
 export async function screenshot(send, path, quality = 80) {
-  const res = await send('Page.captureScreenshot', { format: 'jpeg', quality });
+  const res = await send('Page.captureScreenshot', {format: 'jpeg', quality});
   writeFileSync(path, Buffer.from(res.result.data, 'base64'));
   return path;
 }
 
 export async function touchTap(send, x, y) {
-  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
-  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x, y, id: 1}]});
+  await send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
 }
 
 // Drag one finger from (x0, y0) to (x1, y1) and lift it. The caller
 // decides how long to hold the drag by sleeping between the calls.
 export async function touchDrag(send, x0, y0, x1, y1, id = 1) {
-  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0, id }] });
-  await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x1, y: y1, id }] });
-  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x: x0, y: y0, id}]});
+  await send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: x1, y: y1, id}]});
+  await send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
 }

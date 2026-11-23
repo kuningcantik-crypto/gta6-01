@@ -7,6 +7,10 @@
 // Wired in main.js. The body gets the `touch` class on the first real
 // touch, which is what makes the touch UI appear on phones and stay
 // hidden on a desktop.
+const STICK_DEAD = 0.18;
+const STICK_RUN = 0.85;
+const KNOB_TRAVEL = 32;
+
 export function createTouchControls(controls, callbacks) {
   const pad = document.getElementById('joystick');
   const knob = document.getElementById('stick');
@@ -14,21 +18,21 @@ export function createTouchControls(controls, callbacks) {
   let stickVec = {x: 0, y: 0};
 
   // Which held action each stick direction turns on. The stick must clear
-  // a 0.18 dead zone before anything engages.
-  function pushStickToInput() {
-    controls.setHeld('up', stickVec.y < -0.18);
-    controls.setHeld('down', stickVec.y > 0.18);
-    controls.setHeld('left', stickVec.x < -0.18);
-    controls.setHeld('right', stickVec.x > 0.18);
+  // a dead zone before anything engages.
+  function applyStick() {
+    controls.setHeld('up', stickVec.y < -STICK_DEAD);
+    controls.setHeld('down', stickVec.y > STICK_DEAD);
+    controls.setHeld('left', stickVec.x < -STICK_DEAD);
+    controls.setHeld('right', stickVec.x > STICK_DEAD);
     // Shoving the stick to the edge on foot also means "run".
     const magnitude = Math.hypot(stickVec.x, stickVec.y);
-    controls.setHeld('run', magnitude > 0.85);
+    controls.setHeld('run', magnitude > STICK_RUN);
     if (knob !== null) {
-      knob.style.transform = 'translate(' + stickVec.x * 32 + 'px, ' + stickVec.y * 32 + 'px)';
+      knob.style.transform = 'translate(' + stickVec.x * KNOB_TRAVEL + 'px, ' + stickVec.y * KNOB_TRAVEL + 'px)';
     }
   }
 
-  function trackStick(event) {
+  function moveStick(event) {
     const box = pad.getBoundingClientRect();
     const midX = box.left + box.width / 2;
     const midY = box.top + box.height / 2;
@@ -40,28 +44,28 @@ export function createTouchControls(controls, callbacks) {
       dy /= len;
     }
     stickVec = {x: dx, y: dy};
-    pushStickToInput();
+    applyStick();
   }
 
-  function releaseStick(event) {
+  function dropStick(event) {
     if (activePointer !== event.pointerId) return;
     activePointer = null;
     stickVec = {x: 0, y: 0};
-    pushStickToInput();
+    applyStick();
   }
 
   if (pad !== null) {
     pad.addEventListener('pointerdown', (event) => {
       activePointer = event.pointerId;
       pad.setPointerCapture(event.pointerId);
-      trackStick(event);
+      moveStick(event);
       event.preventDefault();
     });
     pad.addEventListener('pointermove', (event) => {
-      if (activePointer === event.pointerId) trackStick(event);
+      if (activePointer === event.pointerId) moveStick(event);
     });
-    pad.addEventListener('pointerup', releaseStick);
-    pad.addEventListener('pointercancel', releaseStick);
+    pad.addEventListener('pointerup', dropStick);
+    pad.addEventListener('pointercancel', dropStick);
   }
 
   // The touch buttons: [element id, behaviour, action]. A hold button
@@ -75,7 +79,7 @@ export function createTouchControls(controls, callbacks) {
     ['btn-cam', 'tap', 'camera'],
     ['btn-msn', 'tap', 'missions'],
   ];
-  function wireHoldButton(button, action) {
+  function wireHold(button, action) {
     button.addEventListener('pointerdown', (event) => {
       controls.setHeld(action, true);
       event.preventDefault();
@@ -85,7 +89,7 @@ export function createTouchControls(controls, callbacks) {
     button.addEventListener('pointercancel', letGo);
     button.addEventListener('pointerleave', letGo);
   }
-  function wireTapButton(button, action) {
+  function wireTap(button, action) {
     button.addEventListener('pointerdown', (event) => {
       if (action === 'camera') callbacks.onCamera();
       else controls.press(action);
@@ -96,8 +100,8 @@ export function createTouchControls(controls, callbacks) {
     const [id, behaviour, action] = BUTTONS[i];
     const button = document.getElementById(id);
     if (button === null) continue;
-    if (behaviour === 'hold') wireHoldButton(button, action);
-    else wireTapButton(button, action);
+    if (behaviour === 'hold') wireHold(button, action);
+    else wireTap(button, action);
   }
 
   let touchSeen = false;

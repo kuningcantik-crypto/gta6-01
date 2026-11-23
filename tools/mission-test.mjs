@@ -12,10 +12,10 @@ function wrap(expr) {
   return `(() => { const s = window.__solmar; return ${expr}; })()`;
 }
 
-const { child, port } = await launchChrome(1280, 800, false);
+const {child, port} = await launchChrome(1280, 800, false);
 const results = [];
 try {
-  const { send, events } = await connect(port);
+  const {send, events} = await connect(port);
   await newTab(send, 'http://127.0.0.1:8080/?seed=7', 1280, 800, false);
   const booted = await waitFor(send, '!!window.__solmar', 60000);
   if (!booted) throw new Error('game did not boot (__solmar missing)');
@@ -147,7 +147,7 @@ try {
     const passed = end.missionIndex > index || end.allMissionsDone;
     const cashDelta = (end.cash ?? (await call(`s.state.player.cash`))) - cash0;
     const rp = end.rp ?? (await call(`s.state.player.rp`));
-    return { index, id: start.id, title: start.title, passed, cashDelta, rp, guard, end };
+    return {index, id: start.id, title: start.title, passed, cashDelta, rp, guard, end};
   }
 
   for (let i = 0; i < 12; i += 1) {
@@ -156,7 +156,7 @@ try {
       results.push(r);
       console.log(`${r.passed ? 'PASS' : 'FAIL'} #${i + 1} ${r.title} (cash +$${r.cashDelta}, rp ${r.rp}, steps ${r.guard})`);
     } catch (e) {
-      results.push({ index: i, passed: false, error: String(e) });
+      results.push({index: i, passed: false, error: String(e)});
       console.log(`FAIL #${i + 1}: ${e}`);
     }
   }
@@ -186,7 +186,7 @@ try {
   console.log('console errors:', errs.length ? errs : 'none');
   const fails = results.filter((r) => !r.passed).length + (heli ? 0 : 1) + (blocks >= 1 ? 0 : 1) + (smg ? 0 : 1) + (radio1 !== radio0 ? 0 : 1);
   console.log(`\nMissions: ${results.filter((r) => r.passed).length}/12 passed. Overall fails: ${fails}`);
-  console.log(JSON.stringify({ missions: results.map((r) => ({ index: r.index, title: r.title, passed: r.passed })), heli, roadblocks: blocks >= 1, smg, radio: radio1 !== radio0, fails }));
+  console.log(JSON.stringify({missions: results.map((r) => ({index: r.index, title: r.title, passed: r.passed})), heli, roadblocks: blocks >= 1, smg, radio: radio1 !== radio0, fails}));
   process.exit(fails ? 1 : 0);
 } finally {
   child.kill();

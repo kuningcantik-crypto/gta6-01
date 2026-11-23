@@ -20,27 +20,29 @@ export const DEFAULT_SETTINGS = {
   showMinimap: true,
 };
 
-function isPlainObject(value) {
+function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function mergeIntoDefaults(saved) {
+  const out = {...DEFAULT_SETTINGS};
+  if (!isRecord(saved)) return out;
+  for (const key of Object.keys(DEFAULT_SETTINGS)) {
+    const incoming = saved[key];
+    if (incoming !== undefined && typeof incoming === typeof DEFAULT_SETTINGS[key]) out[key] = incoming;
+  }
+  return out;
+}
+
 export function loadSettings() {
-  const settings = {...DEFAULT_SETTINGS};
   try {
     const raw = window.localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return settings;
-    const saved = JSON.parse(raw);
-    if (!isPlainObject(saved)) return settings;
-    for (const key of Object.keys(DEFAULT_SETTINGS)) {
-      if (saved[key] !== undefined && typeof saved[key] === typeof DEFAULT_SETTINGS[key]) {
-        settings[key] = saved[key];
-      }
-    }
+    if (!raw) return {...DEFAULT_SETTINGS};
+    return mergeIntoDefaults(JSON.parse(raw));
   } catch (err) {
     // A corrupt settings blob is not worth a crash: play with defaults.
     return {...DEFAULT_SETTINGS};
   }
-  return settings;
 }
 
 export function saveSettings(settings) {

@@ -1049,82 +1049,87 @@ export function stepWorld(state, input, dt, audio, camYaw) {
 // The garage shelf: each purchase names its price, the message when Rico
 // cannot afford it, a check that returns a problem string or null, the
 // effect, and the success line for the HUD.
-const GARAGE_SHELF = [
-  {
-    kind: 'repair', price: 100, shortage: 'repair costs $100',
-    check: (rico) => !rico.car ? 'Repair needs a car.'
+// Garage catalogue: what each upgrade costs, when it is refused, what it
+// does, and what the HUD should say. buyGarage walks this table.
+const GARAGE_ITEMS = {
+  repair: {
+    price: 100, shortage: 'repair costs $100',
+    guard: (rico) => !rico.car ? 'Repair needs a car.'
       : (rico.car.condition ?? 100) >= 100 ? 'Car is already in perfect shape.' : null,
     apply: (state, rico) => fixCar(rico.car),
-    message: () => 'Repaired to 100% condition.',
+    note: () => 'Repaired to 100% condition.',
   },
-  {
-    kind: 'tune', price: 400, shortage: 'engine tune costs $400',
-    check: (rico) => rico.garage.tune >= 3 ? 'Engine is maxed out (Tune 3).' : null,
+  tune: {
+    price: 400, shortage: 'engine tune costs $400',
+    guard: (rico) => rico.garage.tune >= 3 ? 'Engine is maxed out (Tune 3).' : null,
     apply: (state, rico) => { rico.garage.tune += 1; },
-    message: (rico) => `Engine tuned to level ${rico.garage.tune} — faster top speed.`,
+    note: (rico) => `Engine tuned to level ${rico.garage.tune} — faster top speed.`,
   },
-  {
-    kind: 'armor', price: 300, shortage: 'armour costs $300',
-    check: (rico) => rico.garage.armor >= 2 ? 'Armour is maxed out.' : null,
+  armor: {
+    price: 300, shortage: 'armour costs $300',
+    guard: (rico) => rico.garage.armor >= 2 ? 'Armour is maxed out.' : null,
     apply: (state, rico) => { rico.garage.armor += 1; },
-    message: (rico) => `Armour fitted (level ${rico.garage.armor}) — rams hurt less.`,
+    note: (rico) => `Armour fitted (level ${rico.garage.armor}) — rams hurt less.`,
   },
-  {
-    kind: 'ammo', price: 80, shortage: 'ammo costs $80',
-    check: (rico, state) => currentWeapon(state).id === 'fists' ? 'Fists need no ammo.' : null,
+  ammo: {
+    price: 80, shortage: 'ammo costs $80',
+    guard: (rico, state) => currentWeapon(state).id === 'fists' ? 'Fists need no ammo.' : null,
     apply: (state, rico) => {
       const w = currentWeapon(state);
       w.ammo += w.mag * 2;
     },
-    message: (rico, state) => `Bought ammo for the ${currentWeapon(state).name}.`,
+    note: (rico, state) => `Bought ammo for the ${currentWeapon(state).name}.`,
   },
-];
+};
 
 // Garage purchases. Returns a message for the HUD, or null if it failed.
 export function buyGarage(state, kind) {
   const rico = state.player;
-  const item = GARAGE_SHELF.find((entry) => entry.kind === kind);
+  const item = GARAGE_ITEMS[kind];
   if (!item) return null;
-  const problem = item.check(rico, state);
+  const problem = item.guard(rico, state);
   if (problem) return problem;
   if (rico.cash < item.price) return `Not enough cash — ${item.shortage}.`;
   spendCash(state, item.price);
   item.apply(state, rico);
-  return item.message(rico, state);
+  return item.note(rico, state);
 }
 
 // Read and write a dotted path ('player.cash') on the state object.
-function readPath(obj, path) {
-  return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+function getDotted(obj, path) {
+  let cursor = obj;
+  for (const key of path.split('.')) {
+    if (cursor == null) return cursor;
+    cursor = cursor[key];
+  }
+  return cursor;
 }
-function writePath(obj, path, value) {
+function setDotted(obj, path, value) {
   const keys = path.split('.');
   const last = keys.pop();
-  const target = keys.reduce((o, k) => o[k], obj);
+  let target = obj;
+  for (const key of keys) target = target[key];
   target[last] = value;
 }
 
-// The save file, as [key, state path, fallback when the save lacks it].
+// The save file, as {key, path, fallback} rows.
 // 'keep' means the current value (a fresh game keeps its own cash and spot).
-const SAVE_SCALARS = [
-  ['cash', 'player.cash', 'keep'],
-  ['rp', 'player.rp', 0],
-  ['missionIndex', 'missionIndex', 0],
-  ['missionStep', 'missionStep', 0],
-  ['x', 'player.x', 'keep'],
-  ['z', 'player.z', 'keep'],
-  ['allMissionsDone', 'allMissionsDone', false],
-  ['radioStation', 'player.radioStation', 0],
-  ['weaponIndex', 'player.weaponIndex', 1],
+const SAVE_FIELDS = [
+  {key: 'cash', path: 'player.cash', fallback: 'keep'},
+  {key: 'rp', path: 'player.rp', fallback: 0},
+  {key: 'missionIndex', path: 'missionIndex', fallback: 0},
+  {key: 'missionStep', path: 'missionStep', fallback: 0},
+  {key: 'x', path: 'player.x', fallback: 'keep'},
+  {key: 'z', path: 'player.z', fallback: 'keep'},
+  {key: 'allMissionsDone', path: 'allMissionsDone', fallback: false},
+  {key: 'radioStation', path: 'player.radioStation', fallback: 0},
+  {key: 'weaponIndex', path: 'player.weaponIndex', fallback: 1},
 ];
 
 export function saveGame(state) {
   try {
     const data = {};
-    for (let i = 0; i < SAVE_SCALARS.length; i += 1) {
-      const [key, path] = SAVE_SCALARS[i];
-      data[key] = readPath(state, path);
-    }
+    for (const field of SAVE_FIELDS) data[field.key] = getDotted(state, field.path);
     data.garage = state.player.garage;
     data.weapons = state.player.weapons.map((w) => ({owned: w.owned, ammo: w.ammo, mag: w.mag}));
     data.districtHeat = state.districtHeat;
@@ -1170,11 +1175,11 @@ export function loadGame() {
 
 export function applySave(state, save) {
   if (save === null || save === undefined) return;
-  for (let i = 0; i < SAVE_SCALARS.length; i += 1) {
-    const [key, path, fallback] = SAVE_SCALARS[i];
-    const base = fallback === 'keep' ? readPath(state, path) : fallback;
-    const value = save[key] === undefined || save[key] === null ? base : save[key];
-    writePath(state, path, key === 'allMissionsDone' ? !!value : value);
+  for (const field of SAVE_FIELDS) {
+    const base = field.fallback === 'keep' ? getDotted(state, field.path) : field.fallback;
+    const stored = save[field.key];
+    const value = stored === undefined || stored === null ? base : stored;
+    setDotted(state, field.path, field.key === 'allMissionsDone' ? !!value : value);
   }
   if (save.garage) state.player.garage = {...state.player.garage, ...save.garage};
   if (Array.isArray(save.weapons)) {

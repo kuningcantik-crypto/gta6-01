@@ -66,10 +66,12 @@ export function tickTram(tram, dt) {
 
 // Posisi tiap gerbong trem saat ini, untuk renderer.
 export function tramPoses(tram) {
-  return tram.cars.map((car) => {
+  const out = [];
+  for (const car of tram.cars) {
     const pose = tramPose(car.along);
-    return {x: pose.x, z: pose.z, angle: pose.angle, line: car.line};
-  });
+    out.push({x: pose.x, z: pose.z, angle: pose.angle, line: car.line});
+  }
+  return out;
 }
 
 // Jarak tempuh halte ke-i di sepanjang loop, untuk perhitungan ETA.

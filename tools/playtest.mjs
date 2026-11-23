@@ -5,15 +5,15 @@
 // Usage: node tools/playtest.mjs
 import { launchChrome, connect, newTab, evalJs, consoleErrors, sleep, waitFor, tapKey, keyDown, keyUp } from './cdp-lib.mjs';
 
-const { child, port } = await launchChrome(1280, 800, false);
+const {child, port} = await launchChrome(1280, 800, false);
 const results = [];
 function report(name, ok, extra = '') {
-  results.push({ name, ok });
+  results.push({name, ok});
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
 }
 
 try {
-  const { send, events } = await connect(port);
+  const {send, events} = await connect(port);
   await newTab(send, 'http://127.0.0.1:8080/?seed=7', 1280, 800, false);
   await waitFor(send, '!!window.__solmar', 60000);
   const call = (expr) => evalJs(send, `(() => { const s = window.__solmar; return ${expr}; })()`);
@@ -119,7 +119,7 @@ try {
   await call(`s.state.player.cash = 777, s.setMission(3)`);
   await sleep(2000); // autosave is 15 s; force one via the pause-menu path instead
   await evalJs(send, `window.__solmar.state.player.cash = 777; localStorage.setItem('solmar-bay.save.v1', JSON.stringify({cash: 777, rp: 123, missionIndex: 3, missionStep: 0, x: 0, z: 30, allMissionsDone: false, radioStation: 1, garage: {tune: 1, armor: 0}, weapons: [], weaponIndex: 1, districtHeat: {}})); 'saved'`);
-  await send('Page.navigate', { url: 'http://127.0.0.1:8080/?seed=7' });
+  await send('Page.navigate', {url: 'http://127.0.0.1:8080/?seed=7'});
   await waitFor(send, '!!window.__solmar', 60000);
   await evalJs(send, `document.getElementById('btn-continue').click(); 'ok'`);
   await sleep(1500);

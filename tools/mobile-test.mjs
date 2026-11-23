@@ -5,7 +5,7 @@
 import { launchChrome, connect, newTab, evalJs, consoleErrors, sleep, waitFor, screenshot, touchDrag, touchTap } from './cdp-lib.mjs';
 
 const OUT = process.argv[2] || '/tmp/mobile.jpg';
-const { child, port } = await launchChrome(390, 844, true);
+const {child, port} = await launchChrome(390, 844, true);
 let passes = 0;
 let total = 0;
 function verdict(name, ok, extra = '') {
@@ -15,7 +15,7 @@ function verdict(name, ok, extra = '') {
 }
 
 try {
-  const { send, events } = await connect(port);
+  const {send, events} = await connect(port);
   await newTab(send, 'http://127.0.0.1:8080/?seed=7', 390, 844, true);
   const booted = await waitFor(send, '!!window.__solmar', 60000);
   if (!booted) throw new Error('game did not boot');
@@ -23,13 +23,13 @@ try {
   const centreOf = (id) => evalJs(send, `(() => { const r = document.getElementById('${id}').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
   const playerPos = () => call(`({x: s.state.player.x, z: s.state.player.z})`);
   async function fingerDown(x, y, id) {
-    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id }] });
+    await send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x, y, id}]});
   }
   async function fingerMove(x, y, id) {
-    await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y, id }] });
+    await send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x, y, id}]});
   }
   async function fingerUp() {
-    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
   }
 
   // Is the touch UI actually shown? It appears on first touchstart.

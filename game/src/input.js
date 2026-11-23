@@ -48,7 +48,7 @@ function makeInputCore() {
   const edge = {};
   let shootPulse = false;
   let mouseDX = 0;
-  const core = {
+  return {
     held,
     edge,
     wasPressed(action) {
@@ -85,10 +85,9 @@ function makeInputCore() {
       mouseDX += dx;
     },
   };
-  return core;
 }
 
-function releaseAllHeld(input) {
+function clearHeld(input) {
   for (const action of Object.keys(input.held)) input.held[action] = false;
 }
 
@@ -97,8 +96,7 @@ export function createInput(canvas) {
   window.addEventListener('keydown', (event) => {
     const action = KEYMAP[event.code];
     if (action === undefined) return;
-    const fresh = !input.held[action];
-    if (fresh) input.edge[action] = true;
+    if (!input.held[action]) input.edge[action] = true;
     input.held[action] = true;
     if (action === 'jump' || action === 'pause') event.preventDefault();
   });
@@ -114,7 +112,7 @@ export function createInput(canvas) {
   });
   // Losing the window must release every key, or Rico keeps driving
   // forever when the player alt-tabs away mid-chase.
-  window.addEventListener('blur', () => releaseAllHeld(input));
+  window.addEventListener('blur', () => clearHeld(input));
   return input;
 }
 
@@ -128,7 +126,7 @@ export function createScriptedInput() {
     input.held[action] = value;
   };
   input.clear = () => {
-    for (const action of Object.keys(input.held)) input.held[action] = false;
+    clearHeld(input);
     for (const action of Object.keys(input.edge)) input.edge[action] = false;
   };
   return input;

@@ -37,10 +37,10 @@ async function measureFps(send, seconds) {
   return evalJs(send, expr, true);
 }
 
-async function withBrowser(width, height, mobile, body) {
-  const { child, port } = await launchChrome(width, height, mobile);
+async function runWithBrowser(width, height, mobile, body) {
+  const {child, port} = await launchChrome(width, height, mobile);
   try {
-    const { send, events } = await connect(port);
+    const {send, events} = await connect(port);
     return await body(send, events);
   } finally {
     child.kill();
@@ -53,7 +53,7 @@ async function doFps() {
   const keys = (argAt(5, '')).split(',').filter(Boolean);
   const fw = Number(process.env.FPS_W || 1280);
   const fh = Number(process.env.FPS_H || 800);
-  await withBrowser(fw, fh, false, async (send, events) => {
+  await runWithBrowser(fw, fh, false, async (send, events) => {
     await newTab(send, url, fw, fh, false);
     await sleep(2500);
     if (!process.env.FPS_TITLE) {
@@ -67,7 +67,7 @@ async function doFps() {
     for (const k of keys) await keyDown(send, `Key${k}`, k.toLowerCase());
     const result = await measureFps(send, seconds);
     for (const k of keys) await keyUp(send, `Key${k}`, k.toLowerCase());
-    console.log(JSON.stringify({ url, seconds, keys, ...result, consoleErrors: consoleErrors(events) }, null, 2));
+    console.log(JSON.stringify({url, seconds, keys, ...result, consoleErrors: consoleErrors(events)}, null, 2));
   });
 }
 
@@ -81,20 +81,20 @@ async function doShot() {
   const width = Number(argAt(5, 1280));
   const height = Number(argAt(6, 800));
   const mobile = argAt(7) === 'mobile';
-  await withBrowser(width, height, mobile, async (send, events) => {
+  await runWithBrowser(width, height, mobile, async (send, events) => {
     await newTab(send, url, width, height, mobile);
     const ready = await waitFor(send, 'window.__shotReady === true');
     if (!ready) console.log('WARN: __shotReady never set; screenshotting anyway');
     await sleep(400);
     await screenshot(send, out);
-    console.log(JSON.stringify({ out, ready, consoleErrors: consoleErrors(events) }, null, 2));
+    console.log(JSON.stringify({out, ready, consoleErrors: consoleErrors(events)}, null, 2));
   });
 }
 
 async function doEval() {
   const url = argAt(3);
   const expr = argAt(4);
-  await withBrowser(1280, 800, false, async (send, events) => {
+  await runWithBrowser(1280, 800, false, async (send, events) => {
     await newTab(send, url, 1280, 800, false);
     // The game module can take a while to boot under SwiftShader; wait for
     // the diagnostics handle instead of assuming a fixed sleep is enough.
@@ -107,7 +107,7 @@ async function doEval() {
   });
 }
 
-const COMMANDS = { fps: doFps, shot: doShot, eval: doEval };
+const COMMANDS = {fps: doFps, shot: doShot, eval: doEval};
 const cmd = process.argv[2];
 const run = COMMANDS[cmd];
 if (!run) {
