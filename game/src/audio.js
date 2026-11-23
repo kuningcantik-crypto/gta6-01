@@ -3,7 +3,7 @@
 // pickup chime, a mission sting, rain on the roof, and a soft sunset pad
 // under the title screen. One chord per radio station — switching station
 // retunes the pad.
-const STATION_CHORDS = [
+const RADIO_CHORDS = [
   [220, 277.18, 329.63],
   [196, 246.94, 293.66],
   [174.61, 220, 261.63],
@@ -13,17 +13,16 @@ const STATION_CHORDS = [
 
 export function createAudio() {
   let ctx = null;
-  let motor = null;
-  let motorLevel = null;
-  let wail = null;
-  let wailLevel = null;
-  let padVoices = null;
-  let rainSrc = null;
-  let rainLevel = null;
+  let engineOsc = null;
+  let engineGain = null;
+  let sirenOsc = null;
+  let padNotes = null;
+  let rainNode = null;
+  let rainGain = null;
   let live = false;
   let volume = 0.8;
 
-  function openContext() {
+  function ensureContext() {
     if (ctx !== null) return true;
     try {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -34,50 +33,50 @@ export function createAudio() {
   }
 
   function unlock() {
-    if (!openContext()) return;
+    if (!ensureContext()) return;
     if (ctx.state === 'suspended') ctx.resume();
     live = true;
-    startMotor();
+    startEngineHum();
     startPad();
   }
 
-  function startMotor() {
-    if (motor !== null) return;
-    motor = ctx.createOscillator();
-    motor.type = 'sawtooth';
-    motor.frequency.value = 50;
-    const lowpass = ctx.createBiquadFilter();
-    lowpass.type = 'lowpass';
-    lowpass.frequency.value = 320;
-    motorLevel = ctx.createGain();
-    motorLevel.gain.value = 0;
-    motor.connect(lowpass);
-    lowpass.connect(motorLevel);
-    motorLevel.connect(ctx.destination);
-    motor.start();
+  function startEngineHum() {
+    if (engineOsc !== null) return;
+    engineOsc = ctx.createOscillator();
+    engineOsc.type = 'sawtooth';
+    engineOsc.frequency.value = 50;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 320;
+    engineGain = ctx.createGain();
+    engineGain.gain.value = 0;
+    engineOsc.connect(filter);
+    filter.connect(engineGain);
+    engineGain.connect(ctx.destination);
+    engineOsc.start();
   }
 
   function startPad() {
-    if (padVoices !== null) return;
-    retunePad(STATION_CHORDS[0]);
+    if (padNotes !== null) return;
+    tunePad(RADIO_CHORDS[0]);
   }
 
-  function retunePad(freqs) {
-    padVoices = [];
+  function tunePad(freqs) {
+    padNotes = [];
     const bus = ctx.createGain();
     bus.gain.value = 0.035 * volume;
     bus.connect(ctx.destination);
-    for (let i = 0; i < freqs.length; i += 1) {
+    for (const f of freqs) {
       const voice = ctx.createOscillator();
       voice.type = 'sine';
-      voice.frequency.value = freqs[i];
+      voice.frequency.value = f;
       voice.connect(bus);
       voice.start();
-      padVoices.push(voice);
+      padNotes.push(voice);
     }
   }
 
-  function tone(freq, seconds, shape, loud) {
+  function playTone(freq, seconds, shape, loud) {
     if (ctx === null || !live) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -91,7 +90,7 @@ export function createAudio() {
     osc.stop(ctx.currentTime + seconds);
   }
 
-  function burst(seconds, loud) {
+  function playNoise(seconds, loud) {
     if (ctx === null || !live) return;
     const len = Math.floor(ctx.sampleRate * seconds);
     const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -106,13 +105,13 @@ export function createAudio() {
     src.start();
   }
 
-  // One-shot effects, as small scripts: each entry is a note, and a note
-  // names its instrument (tone or burst), the delay before it fires, and
-  // the arguments. A single runner plays every script.
-  const SCRIPTS = {
-    shot: [['burst', 0, [0.12, 0.3]]],
+  // One-shot effects, as small scripts: each entry names its instrument
+  // (tone or noise), the delay before it fires, and the arguments.
+  // A single runner plays every script.
+  const SOUND_SCRIPTS = {
+    shot: [['noise', 0, [0.12, 0.3]]],
     punch: [
-      ['burst', 0, [0.08, 0.2]],
+      ['noise', 0, [0.08, 0.2]],
       ['tone', 0, [120, 0.08, 'square', 0.1]],
     ],
     pickup: [
@@ -124,7 +123,7 @@ export function createAudio() {
       ['tone', 110, [659, 0.25, 'triangle', 0.16]],
       ['tone', 220, [784, 0.25, 'triangle', 0.16]],
     ],
-    crash: [['burst', 0, [0.25, 0.25]]],
+    crash: [['noise', 0, [0.25, 0.25]]],
     click: [['tone', 0, [600, 0.05, 'square', 0.08]]],
     horn: [
       ['tone', 0, [370, 0.18, 'sawtooth', 0.1]],
@@ -132,31 +131,28 @@ export function createAudio() {
     ],
   };
 
-  function playNote(note) {
-    const [kind, , args] = note;
-    if (kind === 'burst') burst(args[0], args[1]);
-    else tone(args[0], args[1], args[2], args[3]);
+  function runStep(step) {
+    const [kind, , args] = step;
+    if (kind === 'noise') playNoise(args[0], args[1]);
+    else playTone(args[0], args[1], args[2], args[3]);
   }
 
-  function playScript(script) {
-    for (let i = 0; i < script.length; i += 1) {
-      const note = script[i];
-      if (note[1] > 0) setTimeout(() => playNote(note), note[1]);
-      else playNote(note);
+  function runScript(script) {
+    for (const step of script) {
+      if (step[1] > 0) setTimeout(() => runStep(step), step[1]);
+      else runStep(step);
     }
   }
 
   const effects = {};
-  const names = Object.keys(SCRIPTS);
-  for (let i = 0; i < names.length; i += 1) {
-    const name = names[i];
-    effects[name] = () => playScript(SCRIPTS[name]);
+  for (const name of Object.keys(SOUND_SCRIPTS)) {
+    effects[name] = () => runScript(SOUND_SCRIPTS[name]);
   }
 
-  function stopVoices(voices) {
-    for (let i = 0; i < voices.length; i += 1) {
+  function silenceVoices(voices) {
+    for (const v of voices) {
       try {
-        voices[i].stop();
+        v.stop();
       } catch {
         // already stopped
       }
@@ -169,77 +165,76 @@ export function createAudio() {
       volume = Math.max(0, Math.min(1, level));
     },
     setRadio(station) {
-      if (ctx === null || !live || padVoices === null) return;
-      stopVoices(padVoices);
-      padVoices = null;
-      retunePad(STATION_CHORDS[station % STATION_CHORDS.length]);
+      if (ctx === null || !live || padNotes === null) return;
+      silenceVoices(padNotes);
+      padNotes = null;
+      tunePad(RADIO_CHORDS[station % RADIO_CHORDS.length]);
     },
     engine(speed01, driving) {
-      if (ctx === null || motorLevel === null) return;
+      if (ctx === null || engineGain === null) return;
       const target = live && driving ? 0.05 + speed01 * 0.06 : 0;
-      motorLevel.gain.setTargetAtTime(target * volume, ctx.currentTime, 0.1);
-      motor.frequency.setTargetAtTime(50 + speed01 * 110, ctx.currentTime, 0.1);
+      engineGain.gain.setTargetAtTime(target * volume, ctx.currentTime, 0.1);
+      engineOsc.frequency.setTargetAtTime(50 + speed01 * 110, ctx.currentTime, 0.1);
     },
     siren(on) {
       if (ctx === null || !live) return;
-      if (on && wail === null) {
-        wail = ctx.createOscillator();
-        wail.type = 'triangle';
-        wailLevel = ctx.createGain();
-        wailLevel.gain.value = 0.045 * volume;
+      if (on && sirenOsc === null) {
+        sirenOsc = ctx.createOscillator();
+        sirenOsc.type = 'triangle';
+        const level = ctx.createGain();
+        level.gain.value = 0.045 * volume;
         const lfo = ctx.createOscillator();
         lfo.frequency.value = 0.6;
         const lfoGain = ctx.createGain();
         lfoGain.gain.value = 220;
         lfo.connect(lfoGain);
-        lfoGain.connect(wail.frequency);
-        wail.frequency.value = 700;
-        wail.connect(wailLevel);
-        wailLevel.connect(ctx.destination);
-        wail.start();
+        lfoGain.connect(sirenOsc.frequency);
+        sirenOsc.frequency.value = 700;
+        sirenOsc.connect(level);
+        level.connect(ctx.destination);
+        sirenOsc.start();
         lfo.start();
-      } else if (!on && wail !== null) {
+      } else if (!on && sirenOsc !== null) {
         try {
-          wail.stop();
+          sirenOsc.stop();
         } catch {
           // already stopped
         }
-        wail = null;
-        wailLevel = null;
+        sirenOsc = null;
       }
     },
     // Looping rain hiss, driven by the weather system: 0 is silent.
     rain(level) {
       if (ctx === null || !live) return;
-      if (level > 0 && rainSrc === null) {
+      if (level > 0 && rainNode === null) {
         const len = ctx.sampleRate * 2;
         const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < len; i += 1) data[i] = Math.random() * 2 - 1;
-        rainSrc = ctx.createBufferSource();
-        rainSrc.buffer = buffer;
-        rainSrc.loop = true;
+        rainNode = ctx.createBufferSource();
+        rainNode.buffer = buffer;
+        rainNode.loop = true;
         const filter = ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.value = 1200;
-        rainLevel = ctx.createGain();
-        rainLevel.gain.value = 0;
-        rainSrc.connect(filter);
-        filter.connect(rainLevel);
-        rainLevel.connect(ctx.destination);
-        rainSrc.start();
+        rainGain = ctx.createGain();
+        rainGain.gain.value = 0;
+        rainNode.connect(filter);
+        filter.connect(rainGain);
+        rainGain.connect(ctx.destination);
+        rainNode.start();
       }
-      if (rainLevel !== null) {
-        rainLevel.gain.setTargetAtTime(level * 0.12 * volume, ctx.currentTime, 0.5);
+      if (rainGain !== null) {
+        rainGain.gain.setTargetAtTime(level * 0.12 * volume, ctx.currentTime, 0.5);
       }
-      if (level <= 0 && rainSrc !== null) {
+      if (level <= 0 && rainNode !== null) {
         try {
-          rainSrc.stop();
+          rainNode.stop();
         } catch {
           // already stopped
         }
-        rainSrc = null;
-        rainLevel = null;
+        rainNode = null;
+        rainGain = null;
       }
     },
     ...effects,

@@ -1,91 +1,87 @@
-// Hidden stashes: cash packages tucked into Solmar Bay's corners —
-// behind the lighthouse, under the pier, on rooftops you can only reach
-// on foot. Finding one pays cash and respect, and the HUD keeps score.
-// A stash field is plain data; the world sweeps it every frame and the
-// renderer paints the ones still waiting.
-
+// Cash stashes hidden around Solmar Bay: find one on foot or by car and
+// it pays out cash plus respect. The field is plain data — the world
+// sweeps it each frame, the renderer paints the ones still waiting.
 export const STASH_REWARD_CASH = 250;
 export const STASH_REWARD_RP = 25;
 export const STASH_PICKUP_RADIUS = 3.5;
 
-// Twenty hiding spots, picked for variety: alleys, the beach, the pier,
-// the plaza, rooftops edges and the docks. The field takes twelve of
-// them per game, shuffled by the world's own random stream so every
-// seeded run hides them in the same places.
+// Twenty hiding spots as [x, z, hint] triples, chosen for variety: city
+// corners, the beach, the pier, the plaza, the docks. Each game hides
+// twelve of them, shuffled with the world's own stream so a seeded run
+// always hides them in the same places.
 export const STASH_SPOTS = [
-  {x: -150, z: -150, hint: 'behind the north-west wall'},
-  {x: 150, z: -150, hint: 'by the north-east fence'},
-  {x: -150, z: 150, hint: 'behind the south-west wall'},
-  {x: 150, z: 150, hint: 'by the south-east fence'},
-  {x: -130, z: 60, hint: 'in the alley off Tangerine Mile'},
-  {x: 130, z: -60, hint: 'behind the hotel dumpsters'},
-  {x: 0, z: 196, hint: 'at the very end of the pier'},
-  {x: -26, z: 182, hint: 'under the beach boardwalk'},
-  {x: 78, z: 182, hint: 'behind the lifeguard hut'},
-  {x: -78, z: -182, hint: 'by the north docks'},
-  {x: 104, z: -130, hint: 'in the car park stairwell'},
-  {x: -104, z: 130, hint: 'behind the plaza kiosk'},
-  {x: 26, z: 78, hint: 'in the plaza flowerbeds'},
-  {x: -52, z: -130, hint: 'under the overpass shadow'},
-  {x: 156, z: 26, hint: 'on the east promenade'},
-  {x: -156, z: -26, hint: 'on the west promenade'},
-  {x: 52, z: 156, hint: 'by the south beach steps'},
-  {x: -26, z: -156, hint: 'behind the north market'},
-  {x: 130, z: 104, hint: 'in the marina office yard'},
-  {x: -130, z: -104, hint: 'in the old bus depot'},
+  [-150, -150, 'behind the north-west wall'],
+  [150, -150, 'by the north-east fence'],
+  [-150, 150, 'behind the south-west wall'],
+  [150, 150, 'by the south-east fence'],
+  [-130, 60, 'in the alley off Tangerine Mile'],
+  [130, -60, 'behind the hotel dumpsters'],
+  [0, 196, 'at the very end of the pier'],
+  [-26, 182, 'under the beach boardwalk'],
+  [78, 182, 'behind the lifeguard hut'],
+  [-78, -182, 'by the north docks'],
+  [104, -130, 'in the car park stairwell'],
+  [-104, 130, 'behind the plaza kiosk'],
+  [26, 78, 'in the plaza flowerbeds'],
+  [-52, -130, 'under the overpass shadow'],
+  [156, 26, 'on the east promenade'],
+  [-156, -26, 'on the west promenade'],
+  [52, 156, 'by the south beach steps'],
+  [-26, -156, 'behind the north market'],
+  [130, 104, 'in the marina office yard'],
+  [-130, -104, 'in the old bus depot'],
 ];
 
-export function createStashField(rng, count = 12) {
-  const spots = STASH_SPOTS.slice();
-  // Fisher-Yates with the world's stream: deterministic per seed.
-  for (let i = spots.length - 1; i > 0; i -= 1) {
+function shuffleSpots(rng) {
+  const pool = STASH_SPOTS.map(([x, z, hint]) => ({x, z, hint}));
+  for (let i = pool.length - 1; i > 0; i -= 1) {
     const j = Math.floor(rng.next() * (i + 1));
-    const tmp = spots[i];
-    spots[i] = spots[j];
-    spots[j] = tmp;
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  const chosen = spots.slice(0, count);
+  return pool;
+}
+
+export function createStashField(rng, count = 12) {
+  const picked = shuffleSpots(rng).slice(0, count);
   return {
-    list: chosen.map((spot, i) => ({id: i, x: spot.x, z: spot.z, hint: spot.hint, found: false})),
+    list: picked.map((spot, i) => ({id: i, x: spot.x, z: spot.z, hint: spot.hint, found: false})),
     found: 0,
-    total: chosen.length,
+    total: picked.length,
   };
 }
 
-// Walk or drive within reach of a stash and it is yours. Returns the
-// stashes collected on this sweep so the caller can pay out and announce.
+// Sweep the field from (x, z): every stash in reach is collected, and the
+// collected ones come back so the caller can pay out and announce them.
 export function sweepStashes(field, x, z) {
-  const collected = [];
+  const radiusSq = STASH_PICKUP_RADIUS * STASH_PICKUP_RADIUS;
+  const taken = [];
   for (const stash of field.list) {
     if (stash.found) continue;
     const dx = stash.x - x;
     const dz = stash.z - z;
-    if (dx * dx + dz * dz < STASH_PICKUP_RADIUS * STASH_PICKUP_RADIUS) {
-      stash.found = true;
-      field.found += 1;
-      collected.push(stash);
-    }
+    if (dx * dx + dz * dz >= radiusSq) continue;
+    stash.found = true;
+    field.found += 1;
+    taken.push(stash);
   }
-  return collected;
+  return taken;
 }
 
 export function stashesLeft(field) {
   return field.total - field.found;
 }
 
-// "7 / 12" for the HUD counter.
 export function stashProgress(field) {
   return `${field.found} / ${field.total}`;
 }
 
-// Start the hunt over: every stash hidden again, count back to zero.
-// Used when a new game begins.
+// New game: hide everything again, counter back to zero.
 export function resetStashField(field) {
   for (const stash of field.list) stash.found = false;
   field.found = 0;
 }
 
-// The next unfound stash, for the HUD hint line. Cycles as they are found.
+// Hint line for the HUD: the next stash still out there, or null when done.
 export function nextStashHint(field) {
   const open = field.list.find((s) => !s.found);
   return open ? open.hint : null;

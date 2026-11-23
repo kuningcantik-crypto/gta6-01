@@ -4,47 +4,42 @@
 import * as THREE from 'three';
 import { CAR, CITY, PALETTE } from './config.js';
 
-function boxPart(w, h, d, mat, x, y, z) {
-  const part = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  part.position.set(x, y, z);
-  return part;
+function part(w, h, d, mat, x, y, z) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y, z);
+  return mesh;
 }
+
+const WHEEL_SPOTS = [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]];
 
 // A low-poly vehicle from boxes: body, cabin, four wheels, headlights.
 export function makeCarMesh(color, isPolice) {
   const car = new THREE.Group();
   const paint = new THREE.MeshLambertMaterial({color: isPolice ? PALETTE.police : color});
-  const body = boxPart(2.0, 0.65, 4.4, paint, 0, 0.55, 0);
+  const body = part(2.0, 0.65, 4.4, paint, 0, 0.55, 0);
   body.castShadow = true;
   car.add(body);
   const glass = new THREE.MeshLambertMaterial({color: 0x1a2733});
-  const cabin = boxPart(1.7, 0.6, 2.2, glass, 0, 1.15, -0.2);
+  const cabin = part(1.7, 0.6, 2.2, glass, 0, 1.15, -0.2);
   cabin.castShadow = true;
   car.add(cabin);
   const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 10);
   const tyre = new THREE.MeshLambertMaterial({color: 0x111111});
-  const wheels = [];
-  const spots = [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]];
-  let i = 0;
-  while (i < spots.length) {
+  const wheels = WHEEL_SPOTS.map(([wx, wz]) => {
     const wheel = new THREE.Mesh(wheelGeo, tyre);
     wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(spots[i][0], 0.38, spots[i][1]);
+    wheel.position.set(wx, 0.38, wz);
     car.add(wheel);
-    wheels.push(wheel);
-    i += 1;
-  }
+    return wheel;
+  });
   const lampMat = new THREE.MeshBasicMaterial({color: 0xfff2b0});
-  for (const side of [-0.6, 0.6]) {
-    car.add(boxPart(0.4, 0.18, 0.1, lampMat, side, 0.6, 2.22));
-  }
+  for (const side of [-0.6, 0.6]) car.add(part(0.4, 0.18, 0.1, lampMat, side, 0.6, 2.22));
   if (isPolice) {
-    const bars = [[0xff2222, 'lightbar'], [0x2244ff, 'lightbar2']];
-    for (const [barColor, barName] of bars) {
-      const bar = boxPart(1.1, 0.16, 0.4, new THREE.MeshBasicMaterial({color: barColor}), 0, 1.55, -0.2);
-      bar.name = barName;
-      car.add(bar);
-    }
+    const red = part(1.1, 0.16, 0.4, new THREE.MeshBasicMaterial({color: 0xff2222}), 0, 1.55, -0.2);
+    red.name = 'lightbar';
+    const blue = part(1.1, 0.16, 0.4, new THREE.MeshBasicMaterial({color: 0x2244ff}), 0, 1.55, -0.2);
+    blue.name = 'lightbar2';
+    car.add(red, blue);
   }
   car.userData.wheels = wheels;
   return car;
@@ -66,22 +61,27 @@ export function makeCar(kind, color, x, z, angle, rng) {
 
 // Pick a road and a starting point on it for a traffic vehicle.
 export function placeTrafficCar(vehicle, rng) {
-  const alongRoad = rng.next() < 0.5;
+  const eastWest = rng.next() < 0.5;
   const road = CITY.roads[Math.floor(rng.next() * CITY.roads.length)];
   const along = rng.range(-CITY.half + 10, CITY.half - 10);
   vehicle.road = road;
   vehicle.dir = rng.next() < 0.5 ? 1 : -1;
-  const side = vehicle.dir > 0 ? 2.5 : -2.5;
-  if (alongRoad) {
+  const lane = vehicle.dir > 0 ? 2.5 : -2.5;
+  if (eastWest) {
     vehicle.x = along;
-    vehicle.z = road + side;
+    vehicle.z = road + lane;
     vehicle.angle = vehicle.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
   } else {
-    vehicle.x = road + side;
+    vehicle.x = road + lane;
     vehicle.z = along;
     vehicle.angle = vehicle.dir > 0 ? 0 : Math.PI;
   }
   vehicle.speed = 7 + rng.next() * 4;
+}
+
+function clampToLimits(vehicle, topSpeed) {
+  if (vehicle.speed > topSpeed) vehicle.speed = topSpeed;
+  if (vehicle.speed < -CAR.maxReverse) vehicle.speed = -CAR.maxReverse;
 }
 
 // Advance one traffic vehicle along its road; at an intersection it may turn.
@@ -95,29 +95,21 @@ export function stepTrafficCar(vehicle, dt, rng) {
   if (crossing !== undefined && rng.next() < dt * 0.25) {
     vehicle.angle += rng.next() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
   }
-  // Wrap around the city edge instead of driving into the ocean. Each
-  // entry is [axis, edge, the heading to take when past it].
-  const EDGES = [
+  // Wrap around the city edge instead of driving into the ocean.
+  // Each entry is [axis, edge, the heading to take when past it].
+  const BOUNDS = [
     ['x', CITY.half, Math.PI],
     ['x', -CITY.half, 0],
     ['z', CITY.half, -Math.PI / 2],
     ['z', -CITY.half, Math.PI / 2],
   ];
-  for (let e = 0; e < EDGES.length; e += 1) {
-    const axis = EDGES[e][0];
-    const edge = EDGES[e][1];
-    const turn = EDGES[e][2];
+  for (const [axis, edge, turn] of BOUNDS) {
     const past = edge > 0 ? vehicle[axis] > edge : vehicle[axis] < edge;
     if (past) {
       vehicle[axis] = edge;
       vehicle.angle = turn;
     }
   }
-}
-
-function clampSpeed(vehicle, topSpeed) {
-  if (vehicle.speed > topSpeed) vehicle.speed = topSpeed;
-  if (vehicle.speed < -CAR.maxReverse) vehicle.speed = -CAR.maxReverse;
 }
 
 // Arcade driving physics for the player's vehicle. Returns true on a hard hit.
@@ -136,7 +128,7 @@ export function stepPlayerCar(vehicle, input, dt, collide, tune) {
     vehicle.speed -= Math.sign(vehicle.speed) * CAR.grip * dt * 0.6;
     if (Math.abs(vehicle.speed) < 0.2) vehicle.speed = 0;
   }
-  clampSpeed(vehicle, topSpeed);
+  clampToLimits(vehicle, topSpeed);
   // Steering bites harder the faster the car goes, and reverses with it.
   const bite = Math.min(1, Math.abs(vehicle.speed) / 6) * Math.sign(vehicle.speed || 1);
   vehicle.angle += steerInput * CAR.steer * dt * bite;
@@ -154,14 +146,14 @@ export function stepPlayerCar(vehicle, input, dt, collide, tune) {
 }
 
 // Angles wrap at ±π; this keeps any heading difference in range.
-function wrapAngle(a) {
+function angleDiff(a) {
   let out = a;
   while (out > Math.PI) out -= Math.PI * 2;
   while (out < -Math.PI) out += Math.PI * 2;
   return out;
 }
 
-function policeCruise(dist) {
+function cruiseSpeed(dist) {
   if (dist < 6) return 4;
   if (dist <= 30) return 20;
   return 26;
@@ -176,11 +168,9 @@ export function stepPoliceCar(vehicle, targetX, targetZ, dt, collide) {
   const dz = targetZ - vehicle.z;
   const dist = Math.hypot(dx, dz) || 1;
   const wanted = Math.atan2(dx, dz);
-  const diff = wrapAngle(wanted - vehicle.angle);
-  const turn = Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
-  vehicle.angle += turn;
-  const cruise = policeCruise(dist);
-  vehicle.speed += (cruise - vehicle.speed) * dt * 1.2;
+  const diff = angleDiff(wanted - vehicle.angle);
+  vehicle.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
+  vehicle.speed += (cruiseSpeed(dist) - vehicle.speed) * dt * 1.2;
   const nx = vehicle.x + Math.sin(vehicle.angle) * vehicle.speed * dt;
   const nz = vehicle.z + Math.cos(vehicle.angle) * vehicle.speed * dt;
   if (collide && collide(nx, nz, 1.8)) {

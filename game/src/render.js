@@ -21,7 +21,7 @@ const POOL_SIZE = 300;
 // --- particles -----------------------------------------------------------
 // One THREE.Points pool, reused for crashes, explosions and the
 // mission-complete burst. Nothing is allocated per frame.
-function makeParticlePool(scene) {
+function buildParticlePool(scene) {
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(POOL_SIZE * 3);
   const col = new Float32Array(POOL_SIZE * 3);
@@ -36,7 +36,7 @@ function makeParticlePool(scene) {
   const vel = new Float32Array(POOL_SIZE * 3);
   const life = new Float32Array(POOL_SIZE);
   let cursor = 0;
-  const COLORS = {
+  const PALETTES = {
     crash: [0xffb347, 0xd9d9d9, 0xff7a2b],
     explosion: [0xff5a2b, 0xffd76e, 0x333333],
     gold: [0xffd76e, 0xfff2b0, 0x7dff9a],
@@ -44,7 +44,7 @@ function makeParticlePool(scene) {
   };
   return {
     burst(x, y, z, kind, count) {
-      const colors = COLORS[kind] || [0xffffff];
+      const colors = PALETTES[kind] || [0xffffff];
       for (let n = 0; n < count; n += 1) {
         const i = cursor;
         cursor = (cursor + 1) % POOL_SIZE;
@@ -89,11 +89,11 @@ function makeParticlePool(scene) {
 // --- rain ----------------------------------------------------------------
 // A sheet of falling drops that follows the player, fading in with the
 // weather's rain level. One Points cloud, recycled in place.
-const RAIN_DROPS = 500;
-function makeRainPool(scene) {
+const RAIN_COUNT = 500;
+function buildRainPool(scene) {
   const geo = new THREE.BufferGeometry();
-  const pos = new Float32Array(RAIN_DROPS * 3);
-  for (let i = 0; i < RAIN_DROPS; i += 1) {
+  const pos = new Float32Array(RAIN_COUNT * 3);
+  for (let i = 0; i < RAIN_COUNT; i += 1) {
     pos[i * 3] = (Math.random() - 0.5) * 70;
     pos[i * 3 + 1] = Math.random() * 30;
     pos[i * 3 + 2] = (Math.random() - 0.5) * 70;
@@ -113,7 +113,7 @@ function makeRainPool(scene) {
       points.visible = true;
       material.opacity = Math.min(0.7, level * 0.7);
       points.position.set(cx, 0, cz);
-      for (let i = 0; i < RAIN_DROPS; i += 1) {
+      for (let i = 0; i < RAIN_COUNT; i += 1) {
         let y = pos[i * 3 + 1] - 42 * dt;
         if (y < 0) {
           y = 28 + Math.random() * 4;
@@ -130,7 +130,7 @@ function makeRainPool(scene) {
 // --- trams ---------------------------------------------------------------
 // A tram car: a long cream-and-teal box with a window band and a roof
 // rail, riding the loop the tram module defines.
-function makeTramMesh(line) {
+function buildTramMesh(line) {
   const car = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(2.6, 2.4, 10),
@@ -161,7 +161,7 @@ function makeTramMesh(line) {
   return car;
 }
 
-function paintTrams(figures, tram) {
+function syncTrams(figures, tram) {
   const poses = tramPoses(tram);
   poses.forEach((pose, i) => {
     const mesh = figures[i];
@@ -174,7 +174,7 @@ function paintTrams(figures, tram) {
 
 // Hidden stashes glow green and bob, like pickups but smaller and
 // greener — the hunt is a different game from the health crosses.
-function paintStashes(figures, stashes, time, dt) {
+function syncStashes(figures, stashes, time, dt) {
   stashes.list.forEach((stash, i) => {
     const mesh = figures[i];
     if (!mesh) return;
@@ -187,7 +187,7 @@ function paintStashes(figures, stashes, time, dt) {
 // --- per-frame sync ------------------------------------------------------
 // Each function below copies one family of objects from the live state
 // onto its meshes. render() just walks them in order.
-function paintPlayer(mesh, p) {
+function syncPlayer(mesh, p) {
   mesh.position.set(p.x, p.y, p.z);
   mesh.rotation.y = p.angle;
   mesh.visible = p.onFoot;
@@ -198,7 +198,7 @@ function paintPlayer(mesh, p) {
   mesh.userData.armR.rotation.x = swing * 0.8;
 }
 
-function paintCars(scene, figures, cars, dt) {
+function syncCars(scene, figures, cars, dt) {
   const seen = new Set();
   for (const car of cars) {
     let mesh = figures.get(car.id);
@@ -230,7 +230,7 @@ function paintCars(scene, figures, cars, dt) {
   }
 }
 
-function paintPeds(figures, peds) {
+function syncPeds(figures, peds) {
   peds.forEach((ped, i) => {
     const mesh = figures[i];
     mesh.position.set(ped.x, 0, ped.z);
@@ -248,7 +248,7 @@ function paintPeds(figures, peds) {
   });
 }
 
-function paintPickups(figures, pickups, time, dt) {
+function syncPickups(figures, pickups, time, dt) {
   pickups.forEach((pickup, i) => {
     const mesh = figures[i];
     mesh.visible = !pickup.taken;
@@ -257,7 +257,7 @@ function paintPickups(figures, pickups, time, dt) {
   });
 }
 
-function paintBeacon(beacon, diamond, state, dt) {
+function syncBeacon(beacon, diamond, state, dt) {
   const target = stepTarget(state);
   if (!target || state.allMissionsDone) {
     beacon.visible = false;
@@ -271,7 +271,7 @@ function paintBeacon(beacon, diamond, state, dt) {
 
 // The waterfront moves: the wheel turns (cabins stay upright) and the
 // boats sail their lanes, bobbing on the swell.
-function paintWaterfront(scene, time) {
+function syncWaterfront(scene, time) {
   const rotor = scene.getObjectByName('ferris-rotor');
   if (rotor) {
     rotor.rotation.z = time * 0.12;
@@ -290,7 +290,7 @@ function paintWaterfront(scene, time) {
   }
 }
 
-function paintHeli(heli, state) {
+function syncHeli(heli, state) {
   const h = state.heli;
   heli.visible = !!h.active;
   if (!h.active) return;
@@ -306,7 +306,7 @@ function paintHeli(heli, state) {
 }
 
 // --- camera --------------------------------------------------------------
-function aimCamera(camera, state, yaw, mode, fixed) {
+function placeCamera(camera, state, yaw, mode, fixed) {
   const p = state.player;
   if (mode === 'fixed' && fixed) {
     camera.position.set(fixed.x, fixed.y, fixed.z);
@@ -330,7 +330,7 @@ function aimCamera(camera, state, yaw, mode, fixed) {
 }
 
 // Dusk sky dome: a gradient shell, so the horizon is never a flat colour.
-function makeSkyDome(scene) {
+function buildSkyDome(scene) {
   const skyCanvas = document.createElement('canvas');
   skyCanvas.width = 4;
   skyCanvas.height = 256;
@@ -364,7 +364,7 @@ function makeSkyDome(scene) {
 
 // Police helicopter: body, tail, spinning rotor, and a spotlight cone
 // that tracks the player on the ground. Shown when wanted >= 3.
-function makeHeli() {
+function buildHeli() {
   const heli = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(2.2, 1.4, 4.2),
@@ -416,7 +416,7 @@ function makeHeli() {
 }
 
 // Mission beacon: a column of light and a floating diamond over the target.
-function makeBeacon(scene) {
+function buildBeacon(scene) {
   const beacon = new THREE.Group();
   const beam = new THREE.Mesh(
     new THREE.CylinderGeometry(1.6, 1.6, 60, 12, 1, true),
@@ -455,7 +455,7 @@ export function createRenderer(canvas, state) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(PALETTE.skyHorizon);
   scene.fog = new THREE.Fog(0xff9e5e, 120, 420);
-  makeSkyDome(scene);
+  buildSkyDome(scene);
 
   // Golden-hour sun. The shadow frustum follows the player, so shadows
   // stay crisp where the camera is instead of smearing across the whole city.
@@ -502,13 +502,13 @@ export function createRenderer(canvas, state) {
     return mesh;
   });
 
-  const {beacon, diamond} = makeBeacon(scene);
-  const heli = makeHeli();
+  const {beacon, diamond} = buildBeacon(scene);
+  const heli = buildHeli();
   scene.add(heli);
-  const particles = makeParticlePool(scene);
-  const rain = makeRainPool(scene);
+  const particles = buildParticlePool(scene);
+  const rain = buildRainPool(scene);
   const tramFigures = state.tram.cars.map((car) => {
-    const mesh = makeTramMesh(car.line);
+    const mesh = buildTramMesh(car.line);
     scene.add(mesh);
     return mesh;
   });
@@ -549,8 +549,8 @@ export function createRenderer(canvas, state) {
   // objects from the live state. The wrecked-car smoke check is a sync
   // entry too. render() just walks the list with the player and the delta.
   const SYNC_STEPS = [
-    (p) => paintPlayer(playerFigure, p),
-    (p, dt) => paintCars(scene, carFigures, state.cars, dt),
+    (p) => syncPlayer(playerFigure, p),
+    (p, dt) => syncCars(scene, carFigures, state.cars, dt),
     (p, dt) => {
       if (!p.car || (p.car.condition ?? 100) >= 30) return;
       smokeClock -= dt;
@@ -558,13 +558,13 @@ export function createRenderer(canvas, state) {
       smokeClock = 0.25;
       particles.burst(p.car.x, 1.5, p.car.z, 'smoke', 3);
     },
-    () => paintPeds(pedFigures, state.peds),
-    (p, dt) => paintPickups(pickupFigures, state.pickups, state.time, dt),
-    (p, dt) => paintStashes(stashFigures, state.stashes, state.time, dt),
-    () => paintTrams(tramFigures, state.tram),
-    (p, dt) => paintBeacon(beacon, diamond, state, dt),
-    () => paintHeli(heli, state),
-    () => paintWaterfront(scene, state.time),
+    () => syncPeds(pedFigures, state.peds),
+    (p, dt) => syncPickups(pickupFigures, state.pickups, state.time, dt),
+    (p, dt) => syncStashes(stashFigures, state.stashes, state.time, dt),
+    () => syncTrams(tramFigures, state.tram),
+    (p, dt) => syncBeacon(beacon, diamond, state, dt),
+    () => syncHeli(heli, state),
+    () => syncWaterfront(scene, state.time),
     () => { if (beamPivot) beamPivot.rotation.y = state.time * 0.5; },
   ];
 
@@ -621,7 +621,7 @@ export function createRenderer(canvas, state) {
         muzzleLight.intensity = Math.max(muzzleLight.intensity, state.weather.boltGlow * 140);
       }
 
-      aimCamera(camera, state, cameraYaw, mode, fixedCamera);
+      placeCamera(camera, state, cameraYaw, mode, fixedCamera);
       // Shadow frustum follows the player (or the camera target on title).
       const focusX = mode === 'aerial' ? 0 : p.x;
       const focusZ = mode === 'aerial' ? 40 : p.z;

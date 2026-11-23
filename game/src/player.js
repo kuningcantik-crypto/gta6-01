@@ -4,11 +4,11 @@
 import * as THREE from 'three';
 import { PLAYER } from './config.js';
 
-// One limb: a box hung from its top edge, so rotating it swings the
-// whole limb from the joint instead of from its middle.
-function limb(width, height, depth, material, x, y) {
-  const geo = new THREE.BoxGeometry(width, height, depth);
-  geo.translate(0, -height / 2, 0);
+// A limb hangs from its top edge: rotate it and the whole limb swings
+// from the joint instead of from its middle.
+function makeLimb(w, h, d, material, x, y) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  geo.translate(0, -h / 2, 0);
   const part = new THREE.Mesh(geo, material);
   part.position.set(x, y, 0);
   part.castShadow = true;
@@ -39,24 +39,24 @@ export function makePlayerMesh() {
   hair.position.y = 1.76;
   figure.add(hair);
 
-  const limbs = {
-    armL: limb(0.18, 0.7, 0.18, shirt, -0.42, 1.45),
-    armR: limb(0.18, 0.7, 0.18, shirt, 0.42, 1.45),
-    legL: limb(0.22, 0.7, 0.22, denim, -0.16, 0.7),
-    legR: limb(0.22, 0.7, 0.22, denim, 0.16, 0.7),
+  const parts = {
+    armL: makeLimb(0.18, 0.7, 0.18, shirt, -0.42, 1.45),
+    armR: makeLimb(0.18, 0.7, 0.18, shirt, 0.42, 1.45),
+    legL: makeLimb(0.22, 0.7, 0.22, denim, -0.16, 0.7),
+    legR: makeLimb(0.22, 0.7, 0.22, denim, 0.16, 0.7),
   };
-  figure.add(limbs.armL, limbs.armR, limbs.legL, limbs.legR);
-  figure.userData.armL = limbs.armL;
-  figure.userData.armR = limbs.armR;
-  figure.userData.legL = limbs.legL;
-  figure.userData.legR = limbs.legR;
+  figure.add(parts.armL, parts.armR, parts.legL, parts.legR);
+  figure.userData.armL = parts.armL;
+  figure.userData.armR = parts.armR;
+  figure.userData.legL = parts.legL;
+  figure.userData.legR = parts.legR;
   return figure;
 }
 
-// WASD, read against the camera yaw: forward is where the camera looks,
-// strafe is sideways to it. Diagonals are normalised, so cutting a corner
-// is never faster than running straight.
-function headingFromKeys(input, cameraYaw) {
+// WASD read against the camera yaw: forward is where the camera looks,
+// strafe is sideways to it. Diagonals are normalised, so cutting a
+// corner is never faster than running straight.
+function moveDirection(input, cameraYaw) {
   const fwd = (input.held.up ? 1 : 0) - (input.held.down ? 1 : 0);
   const side = (input.held.right ? 1 : 0) - (input.held.left ? 1 : 0);
   if (fwd === 0 && side === 0) return null;
@@ -69,14 +69,14 @@ function headingFromKeys(input, cameraYaw) {
 }
 
 // Space launches Rico; gravity pulls him back and the ground catches him.
-function applyJump(rico, input, dt) {
-  const wantsJump = input.wasPressed('jump') && rico.y <= 0.01;
-  if (wantsJump) rico.vy = PLAYER.jumpSpeed;
+function handleJump(rico, input, dt) {
+  if (input.wasPressed('jump') && rico.y <= 0.01) rico.vy = PLAYER.jumpSpeed;
   rico.vy -= PLAYER.gravity * dt;
   rico.y += rico.vy * dt;
-  if (rico.y > 0) return;
-  rico.y = 0;
-  rico.vy = 0;
+  if (rico.y <= 0) {
+    rico.y = 0;
+    rico.vy = 0;
+  }
 }
 
 // On foot: WASD against the camera, Shift to sprint, Space to jump.
@@ -85,18 +85,15 @@ function applyJump(rico, input, dt) {
 export function stepPlayerOnFoot(rico, input, dt, cameraYaw, collide) {
   const sprinting = !!input.held.run;
   const pace = sprinting ? PLAYER.runSpeed : PLAYER.walkSpeed;
-  const heading = headingFromKeys(input, cameraYaw);
-  const moving = heading !== null;
-  if (moving) rico.angle = Math.atan2(heading.x, heading.z);
-  const stepX = moving ? heading.x * pace * dt : 0;
-  const stepZ = moving ? heading.z * pace * dt : 0;
-  const tryX = rico.x + stepX;
-  const tryZ = rico.z + stepZ;
-  if (!collide(tryX, rico.z, PLAYER.radius)) rico.x = tryX;
-  if (!collide(rico.x, tryZ, PLAYER.radius)) rico.z = tryZ;
+  const dir = moveDirection(input, cameraYaw);
+  const moving = dir !== null;
+  if (moving) rico.angle = Math.atan2(dir.x, dir.z);
+  const dx = moving ? dir.x * pace * dt : 0;
+  const dz = moving ? dir.z * pace * dt : 0;
+  if (!collide(rico.x + dx, rico.z, PLAYER.radius)) rico.x += dx;
+  if (!collide(rico.x, rico.z + dz, PLAYER.radius)) rico.z += dz;
   rico.moving = moving;
   rico.running = sprinting && moving;
-  applyJump(rico, input, dt);
-  const swing = moving ? 1.6 : 0;
-  rico.walkPhase = (rico.walkPhase || 0) + dt * pace * swing;
+  handleJump(rico, input, dt);
+  rico.walkPhase = (rico.walkPhase || 0) + dt * pace * (moving ? 1.6 : 0);
 }
