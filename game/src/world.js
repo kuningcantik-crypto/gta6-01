@@ -1,8 +1,7 @@
-// Dunia Solmar Bay: semua yang terjadi di kota — mengemudi, berjalan
-// kaki, lalu lintas, pejalan kaki, polisi, tingkat wanted, perkelahian,
-// misi, pickup, radio, respect, kemampuan kru, helikopter polisi,
-// roadblock, dan penyimpanan. Renderer hanya melukis state ini; ia
-// tidak pernah memutuskan apa pun.
+// Solmar Bay alive: driving, walking, traffic, pedestrians, police,
+// wanted stars, fights, missions, pickups, radio, respect, crew
+// abilities, the police helicopter, roadblocks and saving. The
+// renderer only paints this state; it never decides anything.
 import { BEST_KEY, CAR, CAR_NAMES, CITY, COMBAT, CREW, MISSIONS, PEDS, PLAYER, RADIO, TRAFFIC, WANTED, WEAPONS, districtAt } from './config.js';
 import { createRandom } from './random.js';
 import { createStashField, sweepStashes, STASH_REWARD_CASH, STASH_REWARD_RP } from './collectibles.js';
@@ -13,11 +12,11 @@ import { knockPedDown, makePed, stepPed } from './pedestrians.js';
 import { stepPlayerOnFoot } from './player.js';
 import { advanceMission, currentMission, currentStep, sayLine, startStep, stepTarget } from './missions.js';
 
-// Benar bila lingkaran berjari-jari r di (x, z) menyentuh kotak gedung mana pun.
-function blocksHit(x, z, r, blocks) {
-  for (const block of blocks) {
-    const nearX = x < block.x0 ? block.x0 : x > block.x1 ? block.x1 : x;
-    const nearZ = z < block.z0 ? block.z0 : z > block.z1 ? block.z1 : z;
+// True when the circle of radius r at (x, z) touches any building box.
+function circleHitsBox(x, z, r, boxes) {
+  for (const box of boxes) {
+    const nearX = Math.max(box.x0, Math.min(x, box.x1));
+    const nearZ = Math.max(box.z0, Math.min(z, box.z1));
     const dx = x - nearX;
     const dz = z - nearZ;
     if (dx * dx + dz * dz < r * r) return true;
@@ -25,22 +24,22 @@ function blocksHit(x, z, r, blocks) {
   return false;
 }
 
-// Callsign unit polisi, dibagikan sesuai urutan spawn supaya panel
-// dispatch bisa menampilkan nama, jarak, dan taktik yang nyata.
-const UNIT_CALLS = ['KITE-1', 'CORAL-48', 'BARRACUDA-18', 'GULL-8', 'BULWARK-2', 'TIDE-7'];
+// Police callsigns, handed out in spawn order so the dispatch panel
+// can show a real name, distance and tactic per unit.
+const UNIT_TAGS = ['KITE-1', 'CORAL-48', 'BARRACUDA-18', 'GULL-8', 'BULWARK-2', 'TIDE-7'];
 export function unitName(car) {
   if (car.roadblock) return 'BULWARK-' + (car.unitNo || 2);
-  return UNIT_CALLS[(car.unitNo || 0) % UNIT_CALLS.length];
+  return UNIT_TAGS[(car.unitNo || 0) % UNIT_TAGS.length];
 }
 
-function newRico() {
-  const arsenal = WEAPONS.map((w) => {
-    const copy = {...w};
-    copy.owned = w.unlockRp === 0;
-    copy.ammo = w.startAmmo || 0;
-    copy.mag = w.id === 'fists' ? Infinity : w.mag;
-    return copy;
-  });
+// Rico, fresh off the bus: on foot, $120, no heat, fists and a pistol.
+function freshRico() {
+  const arsenal = WEAPONS.map((w) => ({
+    ...w,
+    owned: w.unlockRp === 0,
+    ammo: w.startAmmo || 0,
+    mag: w.id === 'fists' ? Infinity : w.mag,
+  }));
   return {
     x: 0, z: 30, y: 0, vy: 0, angle: Math.PI,
     health: PLAYER.maxHealth, cash: PLAYER.startCash,
@@ -57,22 +56,23 @@ function newRico() {
   };
 }
 
-const PAINT_PARKED = [0xd93a2b, 0x2b6fd9, 0xf2c230, 0x2bd97a, 0xeeeeee, 0x8a5fd9, 0xff7a2b];
-const PAINT_FLOW = [0xd93a2b, 0x2b6fd9, 0xf2c230, 0x2bd97a, 0xeeeeee, 0x222222, 0x8a5fd9];
+const PARKED_PAINTS = [0xd93a2b, 0x2b6fd9, 0xf2c230, 0x2bd97a, 0xeeeeee, 0x8a5fd9, 0xff7a2b];
+const FLOW_PAINTS = [0xd93a2b, 0x2b6fd9, 0xf2c230, 0x2bd97a, 0xeeeeee, 0x222222, 0x8a5fd9];
 
-// Mobil parkir di pinggir jalan, siap dicuri.
-function parkStarterCars(state, rng) {
+// Parked cars along the kerbs, ready to steal.
+function parkStarters(state, rng) {
   const bays = [
-    [-44, -100], [60, 60], [8, -52], [-96, 20], [112, -20], [-8, 130], [44, -130],
+    {x: -44, z: -100}, {x: 60, z: 60}, {x: 8, z: -52}, {x: -96, z: 20},
+    {x: 112, z: -20}, {x: -8, z: 130}, {x: 44, z: -130},
   ];
   for (let i = 0; i < bays.length; i += 1) {
-    const [x, z] = bays[i];
-    // Mobil parkir sejajar jalan: arah acak dibulatkan ke mata angin
-    // terdekat, supaya mobil curian melaju menyusuri jalan, bukan
-    // menyerong ke gedung terdekat.
+    const bay = bays[i];
+    // Parked parallel to the road: snap the heading to the nearest
+    // cardinal direction, so a stolen car drives along a street
+    // instead of slewing into the nearest building.
     const drawn = rng.next() * Math.PI * 2;
     const heading = Math.round(drawn / (Math.PI / 2)) * (Math.PI / 2);
-    const car = makeCar('parked', PAINT_PARKED[i % PAINT_PARKED.length], x, z, heading, rng);
+    const car = makeCar('parked', PARKED_PAINTS[i % PARKED_PAINTS.length], bay.x, bay.z, heading, rng);
     car.id = 'parked-' + state.cars.length;
     car.name = CAR_NAMES[i % CAR_NAMES.length];
     car.condition = 100;
@@ -80,9 +80,9 @@ function parkStarterCars(state, rng) {
   }
 }
 
-function seedTraffic(state, rng) {
+function fillTraffic(state, rng) {
   for (let i = 0; i < TRAFFIC.count; i += 1) {
-    const car = makeCar('traffic', PAINT_FLOW[i % PAINT_FLOW.length], 0, 0, 0, rng);
+    const car = makeCar('traffic', FLOW_PAINTS[i % FLOW_PAINTS.length], 0, 0, 0, rng);
     car.id = 'traffic-' + i;
     car.name = CAR_NAMES[i % CAR_NAMES.length];
     car.condition = 100;
@@ -91,18 +91,19 @@ function seedTraffic(state, rng) {
   }
 }
 
-function dropCashSpots(state) {
+function scatterCash(state) {
   const spots = [
-    [-78, -52], [52, 26], [-26, 104], [104, 0], [-104, 78], [26, -104], [78, 130], [-130, -26],
+    {x: -78, z: -52}, {x: 52, z: 26}, {x: -26, z: 104}, {x: 104, z: 0},
+    {x: -104, z: 78}, {x: 26, z: -104}, {x: 78, z: 130}, {x: -130, z: -26},
   ];
-  for (const [x, z] of spots) {
-    state.pickups.push({x, z, taken: false, respawn: 0});
+  for (const spot of spots) {
+    state.pickups.push({x: spot.x, z: spot.z, taken: false, respawn: 0});
   }
 }
 
-// Angka seumur hidup untuk layar jeda: uang dan respect yang diraih,
-// jarak yang ditempuh, dan apa saja yang dihancurkan di jalan.
-function newLedger() {
+// Lifetime numbers for the pause screen: money and respect earned,
+// distance driven, and everything wrecked along the way.
+function freshLedger() {
   return {cashEarned: 0, rpEarned: 0, pedsDown: 0, copsWrecked: 0, shotsFired: 0, missionsDone: 0, timePlayed: 0, distanceKm: 0, lastX: null, lastZ: null};
 }
 
@@ -114,7 +115,7 @@ export function createWorld(seed) {
     time: 0,
     clockMinutes: 17 * 60,
     colliders: [],
-    player: newRico(),
+    player: freshRico(),
     cars: [],
     peds: [],
     pickups: [],
@@ -140,16 +141,16 @@ export function createWorld(seed) {
     events: [],
     garageOpen: false,
     missionsOpen: false,
-    stats: newLedger(),
+    stats: freshLedger(),
     tipsShown: {},
     stashes: createStashField(rng),
     weather: createWeather(),
     tram: createTram(),
   };
-  parkStarterCars(state, rng);
-  seedTraffic(state, rng);
+  parkStarters(state, rng);
+  fillTraffic(state, rng);
   for (let i = 0; i < PEDS.count; i += 1) state.peds.push(makePed(rng));
-  dropCashSpots(state);
+  scatterCash(state);
   return state;
 }
 
@@ -159,63 +160,63 @@ export function spawnFx(state, x, y, z, kind) {
 }
 
 export function addWanted(state, stars, audio) {
-  const rico = state.player;
-  const before = rico.wanted;
-  rico.wanted = Math.min(WANTED.maxStars, rico.wanted + stars);
-  rico.crimeTimer = 0;
-  const district = districtAt(rico.x, rico.z).name;
+  const driver = state.player;
+  const before = driver.wanted;
+  driver.wanted = Math.min(WANTED.maxStars, driver.wanted + stars);
+  driver.crimeTimer = 0;
+  const district = districtAt(driver.x, driver.z).name;
   const heat = state.districtHeat[district] || 0;
   state.districtHeat[district] = Math.min(100, heat + stars * 8);
-  if (rico.wanted > before && audio) audio.siren(true);
-  if (before === 0 && rico.wanted > 0) flashTip(state, 'wanted');
+  if (driver.wanted > before && audio) audio.siren(true);
+  if (before === 0 && driver.wanted > 0) flashTip(state, 'wanted');
 }
 
-// Uang, respect, pesan, dan kerusakan mobil masing-masing berubah di
-// tepat satu tempat, supaya ekonomi dan feed event tetap konsisten.
-function giveCash(state, amount) {
+// Cash, respect, messages and car damage each change in exactly one
+// place, so the economy and the event feed stay consistent.
+function credit(state, amount) {
   state.player.cash += amount;
   state.stats.cashEarned += amount;
 }
-function spendCash(state, amount) {
+function debit(state, amount) {
   state.player.cash -= amount;
 }
-function fineCash(state, amount) {
+function penalize(state, amount) {
   const left = state.player.cash - amount;
   state.player.cash = left > 0 ? left : 0;
 }
-function giveRp(state, amount) {
+function awardRp(state, amount) {
   state.player.rp += amount;
   state.stats.rpEarned += amount;
 }
-function announce(state, text) {
+function tell(state, text) {
   state.events.push({type: 'message', text});
 }
-function hurtCar(car, amount) {
+function damageCar(car, amount) {
   const total = (car.damage || 0) + amount;
   car.damage = total;
   car.condition = Math.max(0, 100 - total);
   return total;
 }
-function fixCar(car) {
+function repairCar(car) {
   car.damage = 0;
   car.condition = 100;
 }
 
-// Tips jalanan pertama kali: tiap tips muncul sekali per game, saat
-// situasinya pertama kali terjadi, supaya pemain baru belajar tanpa
-// layar tutorial yang menghalangi.
-const TIP_LINES = [
-  {key: 'car', text: 'Cars are faster than feet — but stealing one in front of a cop is a crime.'},
-  {key: 'wanted', text: 'Wanted! Break line of sight and the stars fade. Plates (Z) drop one star.'},
-  {key: 'weapon', text: 'New guns live in slots 1-7. Q cycles the ones you own.'},
-  {key: 'health', text: 'Health is low — find a green cross pickup, or visit the hospital.'},
-  {key: 'garage', text: 'Safehouse garage. Press G near here to tune, armour and repair the ride.'},
-];
+// First-time street tips: each one fires once per game, when its
+// situation first happens, so a new player learns without a tutorial
+// screen in the way.
+const TIPS = {
+  car: 'Cars are faster than feet — but stealing one in front of a cop is a crime.',
+  wanted: 'Wanted! Break line of sight and the stars fade. Plates (Z) drop one star.',
+  weapon: 'New guns live in slots 1-7. Q cycles the ones you own.',
+  health: 'Health is low — find a green cross pickup, or visit the hospital.',
+  garage: 'Safehouse garage. Press G near here to tune, armour and repair the ride.',
+};
 function flashTip(state, key) {
-  const tip = TIP_LINES.find((t) => t.key === key);
+  const tip = TIPS[key];
   if (!tip || state.tipsShown[key]) return;
   state.tipsShown[key] = true;
-  announce(state, 'TIP — ' + tip.text);
+  tell(state, 'TIP — ' + tip);
 }
 
 export function currentWeapon(state) {
@@ -228,12 +229,12 @@ export function unlockWeapons(state) {
     if (w.owned || state.player.rp < w.unlockRp) continue;
     w.owned = true;
     w.ammo = w.startAmmo || 0;
-    announce(state, 'Unlocked: ' + w.name + '! Press ' + (i + 1) + ' to equip.');
+    tell(state, 'Unlocked: ' + w.name + '! Press ' + (i + 1) + ' to equip.');
     flashTip(state, 'weapon');
   }
 }
 
-function nearestCar(state, x, z, maxDist) {
+function closestCar(state, x, z, maxDist) {
   let best = null;
   let bestD = maxDist;
   for (const car of state.cars) {
@@ -246,9 +247,9 @@ function nearestCar(state, x, z, maxDist) {
   return best;
 }
 
-function sendPatrols(state, audio) {
-  const rico = state.player;
-  const wanted = Math.min(WANTED.maxPolice, rico.wanted * WANTED.policePerStar);
+function dispatchCruisers(state, audio) {
+  const driver = state.player;
+  const wanted = Math.min(WANTED.maxPolice, driver.wanted * WANTED.policePerStar);
   let onDuty = 0;
   let totalPolice = 0;
   for (const c of state.cars) {
@@ -258,8 +259,8 @@ function sendPatrols(state, audio) {
   }
   for (let i = onDuty; i < wanted; i += 1) {
     const angle = state.rng.next() * Math.PI * 2;
-    const x = rico.x + Math.sin(angle) * 70;
-    const z = rico.z + Math.cos(angle) * 70;
+    const x = driver.x + Math.sin(angle) * 70;
+    const z = driver.z + Math.cos(angle) * 70;
     const clampedX = Math.max(-CITY.half, Math.min(CITY.half, x));
     const clampedZ = Math.max(-CITY.half, Math.min(CITY.half, z));
     const car = makeCar('police', 0x1c2b4a, clampedX, clampedZ, angle, state.rng);
@@ -268,15 +269,15 @@ function sendPatrols(state, audio) {
     car.condition = 100;
     state.cars.push(car);
   }
-  if (audio) audio.siren(rico.wanted > 0);
+  if (audio) audio.siren(driver.wanted > 0);
 }
 
-// Posisi dua cruiser roadblock: di jalan terdekat di depan Rico.
-function blockSite(state) {
-  const rico = state.player;
-  const aheadX = rico.x + Math.sin(rico.angle) * 46;
-  const aheadZ = rico.z + Math.cos(rico.angle) * 46;
-  const vertical = Math.abs(Math.sin(rico.angle)) > Math.abs(Math.cos(rico.angle));
+// Where the two roadblock cruisers go: the nearest road ahead of Rico.
+function pickBlockPoint(state) {
+  const driver = state.player;
+  const aheadX = driver.x + Math.sin(driver.angle) * 46;
+  const aheadZ = driver.z + Math.cos(driver.angle) * 46;
+  const vertical = Math.abs(Math.sin(driver.angle)) > Math.abs(Math.cos(driver.angle));
   const along = vertical ? aheadX : aheadZ;
   let nearest = CITY.roads[0];
   for (let i = 1; i < CITY.roads.length; i += 1) {
@@ -286,18 +287,18 @@ function blockSite(state) {
   return {road: nearest, vertical, aheadX, aheadZ};
 }
 
-function raiseRoadblocks(state) {
-  const rico = state.player;
+function holdRoadblocks(state) {
+  const driver = state.player;
   const blocks = [];
   for (const c of state.cars) {
     if (c.roadblock) blocks.push(c);
   }
-  if (rico.wanted < 4) {
+  if (driver.wanted < 4) {
     if (blocks.length > 0) state.cars = state.cars.filter((c) => !c.roadblock);
     return;
   }
   if (blocks.length >= 2) return;
-  const spot = blockSite(state);
+  const spot = pickBlockPoint(state);
   for (let i = blocks.length; i < 2; i += 1) {
     const car = makeCar('police', 0x1c2b4a, 0, 0, 0, state.rng);
     car.roadblock = true;
@@ -315,126 +316,129 @@ function raiseRoadblocks(state) {
     }
     state.cars.push(car);
   }
-  announce(state, 'Roadblock ahead! The SBPD sealed the road.');
+  tell(state, 'Roadblock ahead! The SBPD sealed the road.');
 }
 
-function circleHeli(state) {
-  const rico = state.player;
+function orbitHeli(state) {
+  const driver = state.player;
   const heli = state.heli;
-  if (rico.wanted >= 3 && !heli.active) {
+  if (driver.wanted >= 3 && !heli.active) {
     heli.active = true;
-    heli.x = rico.x + 40;
-    heli.z = rico.z - 40;
+    heli.x = driver.x + 40;
+    heli.z = driver.z - 40;
     heli.y = 42;
-    announce(state, 'Air One has you in the light!');
-  } else if (rico.wanted < 3 && heli.active) {
+    tell(state, 'Air One has you in the light!');
+  } else if (driver.wanted < 3 && heli.active) {
     heli.active = false;
     return;
   }
   if (!heli.active) return;
   const t = state.time * 0.5;
-  const hoverX = rico.x + Math.sin(t) * 18;
-  const hoverZ = rico.z + Math.cos(t) * 18;
+  const hoverX = driver.x + Math.sin(t) * 18;
+  const hoverZ = driver.z + Math.cos(t) * 18;
   heli.x += (hoverX - heli.x) * 0.03;
   heli.z += (hoverZ - heli.z) * 0.03;
-  heli.angle = Math.atan2(rico.x - heli.x, rico.z - heli.z);
+  heli.angle = Math.atan2(driver.x - heli.x, driver.z - heli.z);
   heli.rotor += 0.35;
 }
-function getInCar(state, audio) {
-  const rico = state.player;
-  const car = nearestCar(state, rico.x, rico.z, 4);
+
+function climbIn(state, audio) {
+  const driver = state.player;
+  const car = closestCar(state, driver.x, driver.z, 4);
   if (car === null) return false;
   if (car.kind === 'traffic') {
     addWanted(state, 1, audio);
-    announce(state, 'Car stolen! The cops are on you.');
+    tell(state, 'Car stolen! The cops are on you.');
   }
   if (car.kind === 'police') {
     addWanted(state, 2, audio);
-    announce(state, 'You stole a police cruiser!');
+    tell(state, 'You stole a police cruiser!');
   }
   car.kind = 'player';
-  rico.car = car;
+  driver.car = car;
   flashTip(state, 'car');
-  rico.onFoot = false;
-  rico.x = car.x;
-  rico.z = car.z;
-  rico.angle = car.angle;
+  driver.onFoot = false;
+  driver.x = car.x;
+  driver.z = car.z;
+  driver.angle = car.angle;
   if (audio) audio.click();
   return true;
 }
 
-function getOutOfCar(state) {
-  const rico = state.player;
-  if (rico.car === null || rico.car === undefined) return;
-  const car = rico.car;
+function climbOut(state) {
+  const driver = state.player;
+  if (driver.car === null || driver.car === undefined) return;
+  const car = driver.car;
   car.kind = 'parked';
   car.speed = 0;
   const sideX = Math.sin(car.angle + Math.PI / 2) * 3;
   const sideZ = Math.cos(car.angle + Math.PI / 2) * 3;
-  rico.x = car.x + sideX;
-  rico.z = car.z + sideZ;
-  rico.angle = car.angle;
-  rico.car = null;
-  rico.onFoot = true;
-  rico.y = 0;
-  rico.vy = 0;
+  driver.x = car.x + sideX;
+  driver.z = car.z + sideZ;
+  driver.angle = car.angle;
+  driver.car = null;
+  driver.onFoot = true;
+  driver.y = 0;
+  driver.vy = 0;
 }
 
-function disableCruiser(state, car, audio) {
+function wreckCruiser(state, car, audio) {
   if (car.disabled) return;
   car.disabled = true;
   car.speed = 0;
   state.stats.copsWrecked += 1;
   spawnFx(state, car.x, 1, car.z, 'explosion');
-  giveCash(state, 50);
-  giveRp(state, 25);
+  credit(state, 50);
+  awardRp(state, 25);
   unlockWeapons(state);
-  announce(state, 'Police car disabled! +$50');
+  tell(state, 'Police car disabled! +$50');
   const step = currentStep(state);
   if (step !== null && step.kind === 'eliminate') state.eliminated = (state.eliminated || 0) + 1;
   if (audio) audio.crash();
 }
 
-// Pick the best thing in the firing cone: nearest along the aim, with a
-// penalty for how far off-centre it is. Returns {kind, ref, dist} or null.
-function aimAt(state, camYaw, range) {
-  const rico = state.player;
+// Pick the best thing in the firing cone: nearest along the aim, with
+// a penalty for how far off-centre it is. Returns {kind, ref, dist}
+// or null.
+function pickTarget(state, camYaw, range) {
+  const driver = state.player;
   const dirX = Math.sin(camYaw);
   const dirZ = Math.cos(camYaw);
-  let best = null;
-  let bestScore = Infinity;
-  const consider = (x, z, kind, ref) => {
-    const dx = x - rico.x;
-    const dz = z - rico.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist > range || dist < 0.5) return;
-    const along = dx * dirX + dz * dirZ;
-    const side = Math.abs(dx * dirZ - dz * dirX);
-    if (along < 0 || side > 1.2 + dist * 0.05) return;
-    const score = dist + side * 4;
-    if (score >= bestScore) return;
-    bestScore = score;
-    best = {kind, ref, dist};
-  };
+  const candidates = [];
   for (let i = 0; i < state.peds.length; i += 1) {
     const ped = state.peds[i];
-    if (ped.state !== 'down') consider(ped.x, ped.z, 'ped', ped);
+    if (ped.state !== 'down') candidates.push({kind: 'ped', ref: ped, x: ped.x, z: ped.z});
   }
   for (let i = 0; i < state.cars.length; i += 1) {
     const car = state.cars[i];
-    if (car !== rico.car) consider(car.x, car.z, 'car', car);
+    if (car !== driver.car) candidates.push({kind: 'car', ref: car, x: car.x, z: car.z});
+  }
+  let best = null;
+  let bestScore = Infinity;
+  for (const cand of candidates) {
+    const dx = cand.x - driver.x;
+    const dz = cand.z - driver.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > range || dist < 0.5) continue;
+    const along = dx * dirX + dz * dirZ;
+    const side = Math.abs(dx * dirZ - dz * dirX);
+    if (along < 0 || side > 1.2 + dist * 0.05) continue;
+    const score = dist + side * 4;
+    if (score >= bestScore) continue;
+    bestScore = score;
+    best = {kind: cand.kind, ref: cand.ref, dist};
   }
   return best;
 }
 
-function blowUpRpg(state, car, audio) {
+function detonateRpg(state, car, audio) {
   spawnFx(state, car.x, 1.5, car.z, 'explosion');
   for (let i = 0; i < state.cars.length; i += 1) {
     const other = state.cars[i];
     if (other === state.player.car) continue;
     if (Math.hypot(other.x - car.x, other.z - car.z) >= 9) continue;
     other.damage = (other.damage || 0) + 120;
-    if (other.kind === 'police' && other.damage >= 100) disableCruiser(state, other, audio);
+    if (other.kind === 'police' && other.damage >= 100) wreckCruiser(state, other, audio);
   }
   for (let i = 0; i < state.peds.length; i += 1) {
     const ped = state.peds[i];
@@ -443,45 +447,45 @@ function blowUpRpg(state, car, audio) {
   addWanted(state, 2, audio);
 }
 
-function fireWeapon(state, camYaw, audio) {
-  const rico = state.player;
+function shoot(state, camYaw, audio) {
+  const driver = state.player;
   const weapon = currentWeapon(state);
   if (weapon.id === 'fists') {
-    throwPunch(state, audio);
+    swingFist(state, audio);
     return;
   }
-  if (rico.reloadTimer > 0 || rico.shootTimer > 0) return;
+  if (driver.reloadTimer > 0 || driver.shootTimer > 0) return;
   if (weapon.mag <= 0) {
     if (weapon.ammo > 0) {
-      rico.reloadTimer = COMBAT.reloadSeconds;
-      announce(state, 'Reloading…');
+      driver.reloadTimer = COMBAT.reloadSeconds;
+      tell(state, 'Reloading…');
     } else {
-      announce(state, weapon.name + ' is dry — no reserve ammo.');
+      tell(state, weapon.name + ' is dry — no reserve ammo.');
     }
     return;
   }
   weapon.mag -= 1;
   state.stats.shotsFired += 1;
-  rico.shootTimer = weapon.cooldown;
+  driver.shootTimer = weapon.cooldown;
   if (audio) audio.shot();
   const range = weapon.id === 'sniper' ? 120 : COMBAT.range;
-  const best = aimAt(state, camYaw, range);
+  const best = pickTarget(state, camYaw, range);
   if (best === null) return;
   if (best.kind === 'ped') {
     knockPedDown(best.ref);
-    giveCash(state, 15);
+    credit(state, 15);
     addWanted(state, 1, audio);
-    announce(state, 'Pedestrian down. +$15');
+    tell(state, 'Pedestrian down. +$15');
     return;
   }
   const car = best.ref;
   if (weapon.id === 'rpg') {
-    blowUpRpg(state, car, audio);
+    detonateRpg(state, car, audio);
     return;
   }
-  hurtCar(car, weapon.damage);
+  damageCar(car, weapon.damage);
   if (car.kind === 'police' && car.damage >= 100) {
-    disableCruiser(state, car, audio);
+    wreckCruiser(state, car, audio);
   } else if (car.kind === 'traffic') {
     car.speed = 0;
     car.stalled = 3;
@@ -495,24 +499,24 @@ function fireWeapon(state, camYaw, audio) {
   }
 }
 
-function throwPunch(state, audio) {
-  const rico = state.player;
-  if (rico.punchTimer > 0) return;
-  rico.punchTimer = 0.5;
+function swingFist(state, audio) {
+  const driver = state.player;
+  if (driver.punchTimer > 0) return;
+  driver.punchTimer = 0.5;
   if (audio) audio.punch();
   for (let i = 0; i < state.peds.length; i += 1) {
     const ped = state.peds[i];
     if (ped.state === 'down') continue;
-    if (Math.hypot(ped.x - rico.x, ped.z - rico.z) >= 2.2) continue;
+    if (Math.hypot(ped.x - driver.x, ped.z - driver.z) >= 2.2) continue;
     knockPedDown(ped);
-    giveCash(state, 15);
+    credit(state, 15);
     addWanted(state, 1, audio);
-    announce(state, 'Knocked out! +$15');
+    tell(state, 'Knocked out! +$15');
     return;
   }
 }
 
-function sendCourier(state) {
+function releaseCourier(state) {
   if (state.targetCar !== null && state.targetCar !== undefined) return;
   const step = currentStep(state);
   const pos = (step !== null && step.pos) || {x: 104, z: 52};
@@ -525,13 +529,13 @@ function sendCourier(state) {
   car.speed = 10;
   state.cars.push(car);
   state.targetCar = car;
-  announce(state, 'Courier spotted — white Comet, north side!');
+  tell(state, 'Courier spotted — white Comet, north side!');
 }
 
 // Advance one step and play the right sting: the mission-complete
 // fanfare when a whole mission finished, the pickup blip for a step
 // inside one.
-function moveMissionOn(state, audio) {
+function pushMission(state, audio) {
   const result = advanceMission(state);
   if (audio === null || audio === undefined) return result;
   if (result === 'mission') audio.mission();
@@ -539,141 +543,135 @@ function moveMissionOn(state, audio) {
   return result;
 }
 
-// One branch per step kind. Each gets the state, the audio handle, the
-// step itself, Rico, and a "within radius" test — and returns nothing;
-// advancing is the branch's job.
-let djLine = 0;
+// One handler per step kind. Each gets the state, the audio handle,
+// the step itself, Rico, and a "within radius" test — and returns
+// nothing; advancing is the handler's job.
+let djTurn = 0;
 
-function runStepLogic(state, audio) {
+const STEP_HANDLERS = {
+  goto(state, audio, step, driver, within) {
+    if (step.anyCar) {
+      if (driver.car) {
+        advanceMission(state);
+        if (audio) audio.mission();
+      }
+      return;
+    }
+    if (within(step.pos, 6)) pushMission(state, audio);
+  },
+  timed(state, audio, step, driver, within) {
+    if (within(step.pos, 6)) pushMission(state, audio);
+  },
+  collect(state, audio, step, driver, within) {
+    const spots = step.spots || [];
+    const spot = spots[state.missionCollected || 0];
+    if (spot === undefined || !within(spot, 4)) return;
+    state.missionCollected += 1;
+    credit(state, 25);
+    if (audio) audio.pickup();
+    tell(state, 'Package ' + state.missionCollected + '/' + step.count + ' collected. +$25');
+    if (state.missionCollected >= step.count && advanceMission(state) === 'mission' && audio) audio.mission();
+  },
+  wanted(state, audio, step, driver) {
+    if (driver.wanted >= step.stars) {
+      advanceMission(state);
+      if (audio) audio.pickup();
+    }
+  },
+  pickup(state, audio, step, driver, within) {
+    if (!within(step.pos, 4)) return;
+    state.passenger = true;
+    advanceMission(state);
+    if (audio) audio.pickup();
+    tell(state, 'Passenger aboard. Drive carefully.');
+  },
+  deliver(state, audio, step, driver, within) {
+    if (!state.passenger || !within(step.pos, 6)) return;
+    state.passenger = false;
+    if (advanceMission(state) === 'mission' && audio) audio.mission();
+  },
+  hold(state, audio, step, driver, within) {
+    if (!within(step.pos, 5)) {
+      state.missionHold = Math.max(0, state.missionHold - 1 / 60);
+      return;
+    }
+    state.missionHold += 1 / 60;
+    if (driver.wanted < 4) {
+      driver.wanted = 4;
+      driver.crimeTimer = 0;
+    }
+    if (state.missionHold < step.seconds) return;
+    credit(state, 200);
+    if (advanceMission(state) === 'mission' && audio) audio.mission();
+    tell(state, 'Vault cracked! +$200 — run!');
+  },
+  race(state, audio, step, driver, within) {
+    const checkpoints = step.checkpoints || [];
+    const cp = checkpoints[state.raceIndex || 0];
+    if (cp === undefined || !within(cp, 7)) return;
+    state.raceIndex += 1;
+    if (audio) audio.pickup();
+    tell(state, 'Gate ' + state.raceIndex + '/' + checkpoints.length + '!');
+    if (state.raceIndex >= checkpoints.length && advanceMission(state) === 'mission' && audio) audio.mission();
+  },
+  ram(state, audio) {
+    releaseCourier(state);
+    const t = state.targetCar;
+    if (t === null || t === undefined || !(t.disabled || (t.damage || 0) >= 100)) return;
+    credit(state, 150);
+    tell(state, 'Courier stopped! Cargo secured. +$150');
+    if (advanceMission(state) === 'mission' && audio) audio.mission();
+  },
+  eliminate(state, audio, step) {
+    if ((state.eliminated || 0) >= step.count && advanceMission(state) === 'mission' && audio) audio.mission();
+  },
+};
+
+function driveMission(state, audio) {
   const mission = currentMission(state);
   const step = currentStep(state);
   if (mission === null || step === null) return;
-  const rico = state.player;
-  const within = (pos, radius) => pos !== null && pos !== undefined && Math.hypot(rico.x - pos.x, rico.z - pos.z) < radius;
-  switch (step.kind) {
-    case 'goto': {
-      if (step.anyCar) {
-        if (rico.car) {
-          advanceMission(state);
-          if (audio) audio.mission();
-        }
-        break;
-      }
-      if (within(step.pos, 6)) moveMissionOn(state, audio);
-      break;
-    }
-    case 'timed': {
-      if (within(step.pos, 6)) moveMissionOn(state, audio);
-      break;
-    }
-    case 'collect': {
-      const spots = step.spots || [];
-      const spot = spots[state.missionCollected || 0];
-      if (spot === undefined || !within(spot, 4)) break;
-      state.missionCollected += 1;
-      giveCash(state, 25);
-      if (audio) audio.pickup();
-      announce(state, 'Package ' + state.missionCollected + '/' + step.count + ' collected. +$25');
-      if (state.missionCollected >= step.count && advanceMission(state) === 'mission' && audio) audio.mission();
-      break;
-    }
-    case 'wanted': {
-      if (rico.wanted >= step.stars) {
-        advanceMission(state);
-        if (audio) audio.pickup();
-      }
-      break;
-    }
-    case 'pickup': {
-      if (!within(step.pos, 4)) break;
-      state.passenger = true;
-      advanceMission(state);
-      if (audio) audio.pickup();
-      announce(state, 'Passenger aboard. Drive carefully.');
-      break;
-    }
-    case 'deliver': {
-      if (!state.passenger || !within(step.pos, 6)) break;
-      state.passenger = false;
-      if (advanceMission(state) === 'mission' && audio) audio.mission();
-      break;
-    }
-    case 'hold': {
-      if (!within(step.pos, 5)) {
-        state.missionHold = Math.max(0, state.missionHold - 1 / 60);
-        break;
-      }
-      state.missionHold += 1 / 60;
-      if (rico.wanted < 4) {
-        rico.wanted = 4;
-        rico.crimeTimer = 0;
-      }
-      if (state.missionHold < step.seconds) break;
-      giveCash(state, 200);
-      if (advanceMission(state) === 'mission' && audio) audio.mission();
-      announce(state, 'Vault cracked! +$200 — run!');
-      break;
-    }
-    case 'race': {
-      const checkpoints = step.checkpoints || [];
-      const cp = checkpoints[state.raceIndex || 0];
-      if (cp === undefined || !within(cp, 7)) break;
-      state.raceIndex += 1;
-      if (audio) audio.pickup();
-      announce(state, 'Gate ' + state.raceIndex + '/' + checkpoints.length + '!');
-      if (state.raceIndex >= checkpoints.length && advanceMission(state) === 'mission' && audio) audio.mission();
-      break;
-    }
-    case 'ram': {
-      sendCourier(state);
-      const t = state.targetCar;
-      if (t === null || t === undefined || !(t.disabled || (t.damage || 0) >= 100)) break;
-      giveCash(state, 150);
-      announce(state, 'Courier stopped! Cargo secured. +$150');
-      if (advanceMission(state) === 'mission' && audio) audio.mission();
-      break;
-    }
-    case 'eliminate': {
-      if ((state.eliminated || 0) >= step.count && advanceMission(state) === 'mission' && audio) audio.mission();
-      break;
-    }
-    default:
-      break;
-  }
+  const driver = state.player;
+  const within = (pos, radius) => pos !== null && pos !== undefined && Math.hypot(driver.x - pos.x, driver.z - pos.z) < radius;
+  const handle = STEP_HANDLERS[step.kind];
+  if (handle) handle(state, audio, step, driver, within);
+}
+
+// A finished reload tops the magazine up from the reserve.
+function finishReload(state) {
+  const w = currentWeapon(state);
+  const magSize = WEAPONS[state.player.weaponIndex].mag;
+  const loaded = Math.min(magSize - w.mag, w.ammo);
+  w.mag += loaded;
+  w.ammo -= loaded;
 }
 
 // Clocks and cooldowns: world time, weapon timers, reload, crime and
 // crew cooldowns, the mission timer, and ageing visual effects.
-function tickClocks(state, dt) {
-  const rico = state.player;
+function advanceClocks(state, dt) {
+  const driver = state.player;
   state.time += dt;
   state.stats.timePlayed += dt;
-  const lastX = state.stats.lastX === null || state.stats.lastX === undefined ? rico.x : state.stats.lastX;
-  const lastZ = state.stats.lastZ === null || state.stats.lastZ === undefined ? rico.z : state.stats.lastZ;
-  const travelled = Math.hypot(rico.x - lastX, rico.z - lastZ);
+  const lastX = state.stats.lastX === null || state.stats.lastX === undefined ? driver.x : state.stats.lastX;
+  const lastZ = state.stats.lastZ === null || state.stats.lastZ === undefined ? driver.z : state.stats.lastZ;
+  const travelled = Math.hypot(driver.x - lastX, driver.z - lastZ);
   state.stats.distanceKm += travelled / 1000;
-  state.stats.lastX = rico.x;
-  state.stats.lastZ = rico.z;
+  state.stats.lastX = driver.x;
+  state.stats.lastZ = driver.z;
   state.clockMinutes += dt / 10;
   state.events = [];
-  rico.shootTimer = Math.max(0, rico.shootTimer - dt);
-  rico.punchTimer = Math.max(0, rico.punchTimer - dt);
-  if (rico.reloadTimer > 0) {
-    rico.reloadTimer -= dt;
-    if (rico.reloadTimer <= 0) {
-      const w = currentWeapon(state);
-      const magSize = WEAPONS[state.player.weaponIndex].mag;
-      const loaded = Math.min(magSize - w.mag, w.ammo);
-      w.mag += loaded;
-      w.ammo -= loaded;
-    }
+  driver.shootTimer = Math.max(0, driver.shootTimer - dt);
+  driver.punchTimer = Math.max(0, driver.punchTimer - dt);
+  if (driver.reloadTimer > 0) {
+    driver.reloadTimer -= dt;
+    if (driver.reloadTimer <= 0) finishReload(state);
   }
-  rico.crimeTimer += dt;
-  for (const key of Object.keys(rico.crew)) {
-    const left = rico.crew[key] - dt;
-    rico.crew[key] = left > 0 ? left : 0;
+  driver.crimeTimer += dt;
+  for (const key of Object.keys(driver.crew)) {
+    const left = driver.crew[key] - dt;
+    driver.crew[key] = left > 0 ? left : 0;
   }
-  if (rico.eyesTimer > 0) rico.eyesTimer -= dt;
+  if (driver.eyesTimer > 0) driver.eyesTimer -= dt;
   if (state.dialogue !== null && state.dialogue !== undefined && state.dialogue.timer > 0) {
     state.dialogue.timer -= dt;
   }
@@ -683,7 +681,7 @@ function tickClocks(state, dt) {
     state.missionTimer -= dt;
     if (state.missionTimer <= 0) {
       startStep(state);
-      announce(state, 'Out of time — the job resets. Try again.');
+      tell(state, 'Out of time — the job resets. Try again.');
     }
   }
   for (let i = 0; i < state.fx.length; i += 1) state.fx[i].t += dt;
@@ -691,74 +689,75 @@ function tickClocks(state, dt) {
 }
 
 // Weapon switching: number keys 1–7, Q cycles owned weapons, C changes radio.
-function readWeaponKeys(state, input, audio) {
-  const rico = state.player;
+function handleArsenalKeys(state, input, audio) {
+  const driver = state.player;
   for (let slot = 0; slot < 7; slot += 1) {
     if (!input.wasPressed('w' + (slot + 1))) continue;
-    const w = rico.weapons[slot];
+    const w = driver.weapons[slot];
     if (w.owned) {
-      rico.weaponIndex = slot;
-      announce(state, w.name + ' equipped.');
+      driver.weaponIndex = slot;
+      tell(state, w.name + ' equipped.');
     } else {
-      announce(state, w.name + ' is locked — reach ' + w.unlockRp + ' RP.');
+      tell(state, w.name + ' is locked — reach ' + w.unlockRp + ' RP.');
     }
   }
   if (input.wasPressed('cycleWeapon')) {
     const owned = [];
-    for (let i = 0; i < rico.weapons.length; i += 1) {
-      if (rico.weapons[i].owned) owned.push(i);
+    for (let i = 0; i < driver.weapons.length; i += 1) {
+      if (driver.weapons[i].owned) owned.push(i);
     }
-    const at = owned.indexOf(rico.weaponIndex);
-    rico.weaponIndex = owned[(at + 1) % owned.length];
-    announce(state, currentWeapon(state).name + ' equipped.');
+    const at = owned.indexOf(driver.weaponIndex);
+    driver.weaponIndex = owned[(at + 1) % owned.length];
+    tell(state, currentWeapon(state).name + ' equipped.');
   }
   if (input.wasPressed('radio')) {
-    rico.radioStation = (rico.radioStation + 1) % RADIO.length;
-    if (audio) audio.setRadio(rico.radioStation);
-    const station = RADIO[rico.radioStation];
-    announce(state, '♪ ' + station.name + ' — ' + station.genre);
+    driver.radioStation = (driver.radioStation + 1) % RADIO.length;
+    if (audio) audio.setRadio(driver.radioStation);
+    const station = RADIO[driver.radioStation];
+    tell(state, '♪ ' + station.name + ' — ' + station.genre);
     if (station.lines && station.lines.length > 0) {
-      const line = station.lines[djLine % station.lines.length];
-      djLine += 1;
+      const line = station.lines[djTurn % station.lines.length];
+      djTurn += 1;
       sayLine(state, line, station.dj, 'DJ');
     }
   }
 }
 
 // Crew abilities: Z plates, X roadside repair, V police-vision.
-function readCrewKeys(state, input) {
-  const rico = state.player;
-  if (input.wasPressed('plates') && rico.crew.plates <= 0) {
-    if (rico.wanted > 0) {
-      rico.wanted = Math.max(0, rico.wanted - 1);
-      rico.crew.plates = CREW[0].cooldown;
-      announce(state, 'Mira swapped the plates — one star gone.');
+function handleCrewKeys(state, input) {
+  const driver = state.player;
+  if (input.wasPressed('plates') && driver.crew.plates <= 0) {
+    if (driver.wanted > 0) {
+      driver.wanted = Math.max(0, driver.wanted - 1);
+      driver.crew.plates = CREW[0].cooldown;
+      tell(state, 'Mira swapped the plates — one star gone.');
     } else {
-      announce(state, 'No heat to lose right now.');
+      tell(state, 'No heat to lose right now.');
     }
   }
-  if (input.wasPressed('fix') && rico.crew.fix <= 0) {
-    const needsCar = rico.car === null || rico.car === undefined;
-    const needsCash = rico.car && (rico.car.condition || 100) < 100 && rico.cash >= 50;
+  if (input.wasPressed('fix') && driver.crew.fix <= 0) {
+    const needsCar = driver.car === null || driver.car === undefined;
+    const needsCash = driver.car && (driver.car.condition || 100) < 100 && driver.cash >= 50;
     if (needsCar) {
-      announce(state, 'Quick Fix needs a car.');
+      tell(state, 'Quick Fix needs a car.');
     } else if (needsCash) {
-      spendCash(state, 50);
-      fixCar(rico.car);
-      rico.crew.fix = CREW[1].cooldown;
-      announce(state, 'Lio patched the car up. -$50');
+      debit(state, 50);
+      repairCar(driver.car);
+      driver.crew.fix = CREW[1].cooldown;
+      tell(state, 'Lio patched the car up. -$50');
     }
   }
-  if (input.wasPressed('eyes') && rico.crew.eyes <= 0) {
-    rico.eyesTimer = 10;
-    rico.crew.eyes = CREW[2].cooldown;
-    announce(state, "Kiki's eyes are out — police revealed.");
+  if (input.wasPressed('eyes') && driver.crew.eyes <= 0) {
+    driver.eyesTimer = 10;
+    driver.crew.eyes = CREW[2].cooldown;
+    tell(state, "Kiki's eyes are out — police revealed.");
   }
 }
 
-// Traffic cars drive their roads; the courier target car just drives its
-// own route. A car with a car ahead of it brakes instead of rear-ending it.
-function moveTraffic(state, dt) {
+// Traffic cars drive their roads; the courier target car just drives
+// its own route. A car with a car ahead of it brakes instead of
+// rear-ending it.
+function flowTraffic(state, dt) {
   for (let i = 0; i < state.cars.length; i += 1) {
     const car = state.cars[i];
     if (car.kind !== 'traffic') continue;
@@ -790,47 +789,47 @@ function moveTraffic(state, dt) {
   }
 }
 
-// Police: dispatch units, roadblocks and the helicopter, then step each
-// cruiser. A ram dents the player, it does not delete them: total ram
-// damage is capped so a pile-up is survivable and escapable.
-function movePolice(state, dt, collide, audio) {
-  const rico = state.player;
-  sendPatrols(state, audio);
-  raiseRoadblocks(state);
-  circleHeli(state);
+// Police: dispatch units, roadblocks and the helicopter, then step
+// each cruiser. A ram dents the player, it does not delete them:
+// total ram damage is capped so a pile-up is survivable and escapable.
+function runPolice(state, dt, collide, audio) {
+  const driver = state.player;
+  dispatchCruisers(state, audio);
+  holdRoadblocks(state);
+  orbitHeli(state);
   let copTouching = false;
   let ramCount = 0;
   for (let i = 0; i < state.cars.length; i += 1) {
     const car = state.cars[i];
     if (car.kind !== 'police' || car.disabled || car.roadblock) continue;
-    const hit = stepPoliceCar(car, rico.x, rico.z, dt, collide);
+    const hit = stepPoliceCar(car, driver.x, driver.z, dt, collide);
     if (hit) {
       copTouching = true;
-      if (rico.car) ramCount += 1;
-      else rico.bustedTimer += dt;
+      if (driver.car) ramCount += 1;
+      else driver.bustedTimer += dt;
     }
-    if (car.damage >= 100) disableCruiser(state, car, audio);
+    if (car.damage >= 100) wreckCruiser(state, car, audio);
   }
-  if (ramCount > 0 && rico.car) {
-    const armorCut = 1 - 0.25 * rico.garage.armor;
-    rico.health -= Math.min(3, ramCount * 1.0) * dt * armorCut;
-    rico.car.condition = Math.max(0, (rico.car.condition ?? 100) - ramCount * 0.4 * dt);
+  if (ramCount > 0 && driver.car) {
+    const armorCut = 1 - 0.25 * driver.garage.armor;
+    driver.health -= Math.min(3, ramCount * 1.0) * dt * armorCut;
+    driver.car.condition = Math.max(0, (driver.car.condition ?? 100) - ramCount * 0.4 * dt);
   }
-  if (!copTouching && rico.onFoot) rico.bustedTimer = Math.max(0, rico.bustedTimer - dt * 2);
-  if (rico.bustedTimer >= WANTED.bustSeconds) {
+  if (!copTouching && driver.onFoot) driver.bustedTimer = Math.max(0, driver.bustedTimer - dt * 2);
+  if (driver.bustedTimer >= WANTED.bustSeconds) {
     state.busted = true;
-    fineCash(state, 150);
-    rico.wanted = 0;
+    penalize(state, 150);
+    driver.wanted = 0;
   }
 }
 
 // Ambient life: pedestrians flee danger, cash pickups respawn, wanted
 // decays when Rico stays clean, and health slowly regenerates out of
 // trouble.
-function runAmbient(state, dt, audio) {
-  const rico = state.player;
-  const speeding = rico.car !== null && rico.car !== undefined && Math.abs(rico.car.speed) > 4;
-  const threat = (rico.wanted > 0 || rico.car) && speeding ? {x: rico.x, z: rico.z} : null;
+function runStreetLife(state, dt, audio) {
+  const driver = state.player;
+  const speeding = driver.car !== null && driver.car !== undefined && Math.abs(driver.car.speed) > 4;
+  const threat = (driver.wanted > 0 || driver.car) && speeding ? {x: driver.x, z: driver.z} : null;
   for (let i = 0; i < state.peds.length; i += 1) {
     const ped = state.peds[i];
     const nearThreat = threat !== null && Math.hypot(ped.x - threat.x, ped.z - threat.z) < 18;
@@ -843,64 +842,64 @@ function runAmbient(state, dt, audio) {
       if (pickup.respawn <= 0) pickup.taken = false;
       continue;
     }
-    if (Math.hypot(pickup.x - rico.x, pickup.z - rico.z) < 2.5) {
+    if (Math.hypot(pickup.x - driver.x, pickup.z - driver.z) < 2.5) {
       pickup.taken = true;
       pickup.respawn = 60;
-      giveCash(state, 25);
-      giveRp(state, 5);
+      credit(state, 25);
+      awardRp(state, 5);
       if (audio) audio.pickup();
-      announce(state, 'Cash found! +$25');
+      tell(state, 'Cash found! +$25');
     }
   }
-  if (rico.health < 30 && rico.health > 0) flashTip(state, 'health');
-  const nearGarage = Math.hypot(rico.x + 130, rico.z + 130) < 12;
+  if (driver.health < 30 && driver.health > 0) flashTip(state, 'health');
+  const nearGarage = Math.hypot(driver.x + 130, driver.z + 130) < 12;
   if (!state.garageOpen && nearGarage) flashTip(state, 'garage');
-  if (rico.crimeTimer > WANTED.decayDelay) {
-    rico.decayTimer += dt;
-    if (rico.decayTimer >= WANTED.decayInterval && rico.wanted > 0) {
-      rico.wanted -= 1;
-      rico.decayTimer = 0;
-      if (rico.wanted === 0 && audio) audio.siren(false);
+  if (driver.crimeTimer > WANTED.decayDelay) {
+    driver.decayTimer += dt;
+    if (driver.decayTimer >= WANTED.decayInterval && driver.wanted > 0) {
+      driver.wanted -= 1;
+      driver.decayTimer = 0;
+      if (driver.wanted === 0 && audio) audio.siren(false);
     }
   } else {
-    rico.decayTimer = 0;
+    driver.decayTimer = 0;
   }
-  if (rico.wanted === 0 && rico.health < PLAYER.maxHealth) {
-    rico.health = Math.min(PLAYER.maxHealth, rico.health + 2 * dt);
+  if (driver.wanted === 0 && driver.health < PLAYER.maxHealth) {
+    driver.health = Math.min(PLAYER.maxHealth, driver.health + 2 * dt);
   }
-  if (rico.health <= 0) {
+  if (driver.health <= 0) {
     state.wasted = true;
-    fineCash(state, 100);
+    penalize(state, 100);
   }
 }
 
 // Pedestrians the player's car clips at speed go down — and it is a crime.
-function runOverPeds(state, audio, speedBefore) {
-  const rico = state.player;
+function checkPedStrikes(state, audio, speedBefore) {
+  const driver = state.player;
   for (let i = 0; i < state.peds.length; i += 1) {
     const ped = state.peds[i];
     if (ped.state === 'down') continue;
-    const near = Math.hypot(ped.x - rico.x, ped.z - rico.z) < 2;
+    const near = Math.hypot(ped.x - driver.x, ped.z - driver.z) < 2;
     if (!near || speedBefore <= 5) continue;
     knockPedDown(ped);
     state.stats.pedsDown += 1;
     addWanted(state, 1, audio);
-    announce(state, 'You hit a pedestrian!');
+    tell(state, 'You hit a pedestrian!');
   }
 }
 
 // Car-to-car bumps: separate the two cars, trade speed for damage, and
 // let the mission and police logic react to what got hit.
-function bumpCars(state, collide, audio) {
-  const rico = state.player;
+function resolveBumps(state, collide, audio) {
+  const driver = state.player;
   for (let i = 0; i < state.cars.length; i += 1) {
     const car = state.cars[i];
-    if (car === rico.car || car.kind === 'player') continue;
-    const d = Math.hypot(car.x - rico.x, car.z - rico.z);
+    if (car === driver.car || car.kind === 'player') continue;
+    const d = Math.hypot(car.x - driver.x, car.z - driver.z);
     if (d >= 3.4 || d <= 0.01) continue;
     const shove = (3.4 - d) / 2;
-    const nx = (car.x - rico.x) / d;
-    const nz = (car.z - rico.z) / d;
+    const nx = (car.x - driver.x) / d;
+    const nz = (car.z - driver.z) / d;
     if (car.kind === 'police') {
       // A police ram bounces the cruiser off instead of shoving Rico
       // sideways off the road — the player keeps their line, the cop
@@ -910,22 +909,22 @@ function bumpCars(state, collide, audio) {
     } else {
       car.x += nx * shove;
       car.z += nz * shove;
-      const backX = rico.car.x - nx * shove;
-      const backZ = rico.car.z - nz * shove;
+      const backX = driver.car.x - nx * shove;
+      const backZ = driver.car.z - nz * shove;
       if (!collide(backX, backZ, CAR.radius)) {
-        rico.car.x = backX;
-        rico.car.z = backZ;
-        rico.x = rico.car.x;
-        rico.z = rico.car.z;
+        driver.car.x = backX;
+        driver.car.z = backZ;
+        driver.x = driver.car.x;
+        driver.z = driver.car.z;
       }
     }
-    const impact = Math.abs(rico.car.speed) + Math.abs(car.speed || 0);
-    rico.car.speed *= 0.6;
-    const wear = (rico.car.condition ?? 100) - impact * 0.15;
-    rico.car.condition = Math.max(0, wear);
+    const impact = Math.abs(driver.car.speed) + Math.abs(car.speed || 0);
+    driver.car.speed *= 0.6;
+    const wear = (driver.car.condition ?? 100) - impact * 0.15;
+    driver.car.condition = Math.max(0, wear);
     if (car.kind === 'traffic') car.speed = Math.max(0, car.speed - 4);
     if (car === state.targetCar) {
-      hurtCar(car, impact * 1.6);
+      damageCar(car, impact * 1.6);
       spawnFx(state, car.x, 1, car.z, 'crash');
       if (car.damage >= 100 && !car.disabled) {
         car.disabled = true;
@@ -934,8 +933,8 @@ function bumpCars(state, collide, audio) {
       }
     }
     if (car.kind === 'police') {
-      hurtCar(car, impact * 0.8);
-      if (car.damage >= 100 && !car.disabled) disableCruiser(state, car, audio);
+      damageCar(car, impact * 0.8);
+      if (car.damage >= 100 && !car.disabled) wreckCruiser(state, car, audio);
       // A bump with a police car raises the heat — but only once per
       // scrape, not once per frame of contact.
       if (state.time - (state.lastBumpWanted || -99) > 5) {
@@ -947,156 +946,154 @@ function bumpCars(state, collide, audio) {
 }
 
 // Driving and walking: the car physics or the on-foot step, plus
-// shooting, punching and the reload key. Garage and job-list toggles live
-// in main.js: they must work while the world is frozen behind their
-// overlays.
-function driveOrWalk(ctx) {
+// shooting, punching and the reload key. Garage and job-list toggles
+// live in main.js: they must work while the world is frozen behind
+// their overlays.
+function moveRico(ctx) {
   const state = ctx.state;
   const input = ctx.input;
   const dt = ctx.dt;
   const audio = ctx.audio;
   const camYaw = ctx.camYaw;
   const collide = ctx.collide;
-  const rico = state.player;
-  if (rico.car === null || rico.car === undefined) {
-    stepPlayerOnFoot(rico, input, dt, camYaw, collide);
-    if (input.takeShoot()) fireWeapon(state, camYaw, audio);
-    if (input.wasPressed('punch')) throwPunch(state, audio);
+  const driver = state.player;
+  if (driver.car === null || driver.car === undefined) {
+    stepPlayerOnFoot(driver, input, dt, camYaw, collide);
+    if (input.takeShoot()) shoot(state, camYaw, audio);
+    if (input.wasPressed('punch')) swingFist(state, audio);
   } else {
-    const speedBefore = Math.abs(rico.car.speed);
-    const hardHit = stepPlayerCar(rico.car, input, dt, collide, rico.garage.tune);
+    const speedBefore = Math.abs(driver.car.speed);
+    const hardHit = stepPlayerCar(driver.car, input, dt, collide, driver.garage.tune);
     if (hardHit) {
-      const wear = (rico.car.condition ?? 100) - 4;
-      rico.car.condition = Math.max(0, wear);
-      spawnFx(state, rico.car.x, 1, rico.car.z, 'crash');
+      const wear = (driver.car.condition ?? 100) - 4;
+      driver.car.condition = Math.max(0, wear);
+      spawnFx(state, driver.car.x, 1, driver.car.z, 'crash');
       if (audio) audio.crash();
     }
-    rico.x = rico.car.x;
-    rico.z = rico.car.z;
-    rico.angle = rico.car.angle;
-    runOverPeds(state, audio, speedBefore);
-    bumpCars(state, collide, audio);
+    driver.x = driver.car.x;
+    driver.z = driver.car.z;
+    driver.angle = driver.car.angle;
+    checkPedStrikes(state, audio, speedBefore);
+    resolveBumps(state, collide, audio);
   }
   const weapon = currentWeapon(state);
   const magFull = weapon.mag >= WEAPONS[state.player.weaponIndex].mag;
-  if (input.wasPressed('reload') && !magFull && rico.reloadTimer <= 0) {
-    rico.reloadTimer = COMBAT.reloadSeconds;
+  if (input.wasPressed('reload') && !magFull && driver.reloadTimer <= 0) {
+    driver.reloadTimer = COMBAT.reloadSeconds;
   }
 }
 
 // The living city: the sky turns, the trams loop, and hidden stashes
 // pay out when Rico walks over them. None of this touches missions or
 // wanted levels — it is the city breathing around the story.
-function tickWorldLife(state, dt, audio) {
+function breatheCity(state, dt, audio) {
   const skyChanged = tickWeather(state.weather, dt, state.clockMinutes, state.rng);
   if (skyChanged && state.weather.kind !== 'clear') {
-    announce(state, weatherChatter(state.weather.kind));
+    tell(state, weatherChatter(state.weather.kind));
   }
   tickTram(state.tram, dt);
   const found = sweepStashes(state.stashes, state.player.x, state.player.z);
   for (const stash of found) {
-    giveCash(state, STASH_REWARD_CASH);
-    giveRp(state, STASH_REWARD_RP);
-    announce(state, `Hidden stash found! +$${STASH_REWARD_CASH} (+${STASH_REWARD_RP} RP)`);
+    credit(state, STASH_REWARD_CASH);
+    awardRp(state, STASH_REWARD_RP);
+    tell(state, `Hidden stash found! +$${STASH_REWARD_CASH} (+${STASH_REWARD_RP} RP)`);
     spawnFx(state, stash.x, 1.2, stash.z, 'pickup');
     if (audio) audio.pickup();
   }
 }
 
-// The simulation is a list of systems, run in order every fixed step.
-// Each one takes the same context object — state, input, dt, audio,
-// camera yaw and the collision test — so the order is data, not a long
-// function body.
-const SYSTEMS = [
-  function clocks(ctx) { tickClocks(ctx.state, ctx.dt); },
-  function enterExit(ctx) {
+// The simulation is a pipeline of systems, run in order every fixed
+// step. Each one takes the same context object — state, input, dt,
+// audio, camera yaw and the collision test — so the order is data,
+// not a long function body.
+const PIPELINE = [
+  {name: 'clocks', run: (ctx) => advanceClocks(ctx.state, ctx.dt)},
+  {name: 'enterExit', run: (ctx) => {
     if (ctx.input.wasPressed('enter')) {
-      if (ctx.state.player.car) getOutOfCar(ctx.state);
-      else getInCar(ctx.state, ctx.audio);
+      if (ctx.state.player.car) climbOut(ctx.state);
+      else climbIn(ctx.state, ctx.audio);
     }
-  },
-  function weapons(ctx) { readWeaponKeys(ctx.state, ctx.input, ctx.audio); },
-  function crew(ctx) { readCrewKeys(ctx.state, ctx.input); },
-  function drive(ctx) { driveOrWalk(ctx); },
-  function traffic(ctx) { moveTraffic(ctx.state, ctx.dt); },
-  function police(ctx) { movePolice(ctx.state, ctx.dt, ctx.collide, ctx.audio); },
-  function ambient(ctx) { runAmbient(ctx.state, ctx.dt, ctx.audio); },
-  function missions(ctx) {
-    runStepLogic(ctx.state, ctx.audio);
+  }},
+  {name: 'weapons', run: (ctx) => handleArsenalKeys(ctx.state, ctx.input, ctx.audio)},
+  {name: 'crew', run: (ctx) => handleCrewKeys(ctx.state, ctx.input)},
+  {name: 'drive', run: (ctx) => moveRico(ctx)},
+  {name: 'traffic', run: (ctx) => flowTraffic(ctx.state, ctx.dt)},
+  {name: 'police', run: (ctx) => runPolice(ctx.state, ctx.dt, ctx.collide, ctx.audio)},
+  {name: 'ambient', run: (ctx) => runStreetLife(ctx.state, ctx.dt, ctx.audio)},
+  {name: 'missions', run: (ctx) => {
+    driveMission(ctx.state, ctx.audio);
     unlockWeapons(ctx.state);
-  },
-  function worldLife(ctx) { tickWorldLife(ctx.state, ctx.dt, ctx.audio); },
-  function autosave(ctx) {
+  }},
+  {name: 'worldLife', run: (ctx) => breatheCity(ctx.state, ctx.dt, ctx.audio)},
+  {name: 'autosave', run: (ctx) => {
     ctx.state.saveTimer += ctx.dt;
     if (ctx.state.saveTimer > 15) {
       ctx.state.saveTimer = 0;
       saveGame(ctx.state);
     }
-  },
+  }},
 ];
 
 // One fixed simulation step.
 export function stepWorld(state, input, dt, audio, camYaw) {
   const collide = (x, z, r) => {
     if (Math.abs(x) > CITY.half || z > CITY.beachZ + 24 || z < -CITY.half) return true;
-    return blocksHit(x, z, r, state.colliders);
+    return circleHitsBox(x, z, r, state.colliders);
   };
   const ctx = {state, input, dt, audio, camYaw, collide};
-  for (const system of SYSTEMS) system(ctx);
+  for (const system of PIPELINE) system.run(ctx);
   return state.events;
 }
 
-// The garage shelf: each purchase names its price, the message when Rico
-// cannot afford it, a check that returns a problem string or null, the
-// effect, and the success line for the HUD.
-// Garage catalogue: what each upgrade costs, when it is refused, what it
-// does, and what the HUD should say. buyGarage walks this table.
-const GARAGE_ITEMS = {
-  repair: {
-    price: 100, shortage: 'repair costs $100',
-    guard: (rico) => !rico.car ? 'Repair needs a car.'
-      : (rico.car.condition ?? 100) >= 100 ? 'Car is already in perfect shape.' : null,
-    apply: (state, rico) => fixCar(rico.car),
+// The garage shelf: each purchase names its price, the message when
+// Rico cannot afford it, a check that returns a problem string or
+// null, the effect, and the success line for the HUD.
+const GARAGE_MENU = [
+  {
+    id: 'repair', price: 100, shortage: 'repair costs $100',
+    guard: (driver) => !driver.car ? 'Repair needs a car.'
+      : (driver.car.condition ?? 100) >= 100 ? 'Car is already in perfect shape.' : null,
+    apply: (state, driver) => repairCar(driver.car),
     note: () => 'Repaired to 100% condition.',
   },
-  tune: {
-    price: 400, shortage: 'engine tune costs $400',
-    guard: (rico) => rico.garage.tune >= 3 ? 'Engine is maxed out (Tune 3).' : null,
-    apply: (state, rico) => { rico.garage.tune += 1; },
-    note: (rico) => `Engine tuned to level ${rico.garage.tune} — faster top speed.`,
+  {
+    id: 'tune', price: 400, shortage: 'engine tune costs $400',
+    guard: (driver) => driver.garage.tune >= 3 ? 'Engine is maxed out (Tune 3).' : null,
+    apply: (state, driver) => { driver.garage.tune += 1; },
+    note: (driver) => `Engine tuned to level ${driver.garage.tune} — faster top speed.`,
   },
-  armor: {
-    price: 300, shortage: 'armour costs $300',
-    guard: (rico) => rico.garage.armor >= 2 ? 'Armour is maxed out.' : null,
-    apply: (state, rico) => { rico.garage.armor += 1; },
-    note: (rico) => `Armour fitted (level ${rico.garage.armor}) — rams hurt less.`,
+  {
+    id: 'armor', price: 300, shortage: 'armour costs $300',
+    guard: (driver) => driver.garage.armor >= 2 ? 'Armour is maxed out.' : null,
+    apply: (state, driver) => { driver.garage.armor += 1; },
+    note: (driver) => `Armour fitted (level ${driver.garage.armor}) — rams hurt less.`,
   },
-  ammo: {
-    price: 80, shortage: 'ammo costs $80',
-    guard: (rico, state) => currentWeapon(state).id === 'fists' ? 'Fists need no ammo.' : null,
-    apply: (state, rico) => {
+  {
+    id: 'ammo', price: 80, shortage: 'ammo costs $80',
+    guard: (driver, state) => currentWeapon(state).id === 'fists' ? 'Fists need no ammo.' : null,
+    apply: (state, driver) => {
       const w = currentWeapon(state);
       w.ammo += w.mag * 2;
     },
-    note: (rico, state) => `Bought ammo for the ${currentWeapon(state).name}.`,
+    note: (driver, state) => `Bought ammo for the ${currentWeapon(state).name}.`,
   },
-};
+];
 
 // Garage purchases. Returns a message for the HUD, or null if it failed.
 export function buyGarage(state, kind) {
-  const rico = state.player;
-  const item = GARAGE_ITEMS[kind];
+  const driver = state.player;
+  const item = GARAGE_MENU.find((entry) => entry.id === kind);
   if (!item) return null;
-  const problem = item.guard(rico, state);
+  const problem = item.guard(driver, state);
   if (problem) return problem;
-  if (rico.cash < item.price) return `Not enough cash — ${item.shortage}.`;
-  spendCash(state, item.price);
-  item.apply(state, rico);
-  return item.note(rico, state);
+  if (driver.cash < item.price) return `Not enough cash — ${item.shortage}.`;
+  debit(state, item.price);
+  item.apply(state, driver);
+  return item.note(driver, state);
 }
 
 // Read and write a dotted path ('player.cash') on the state object.
-function getDotted(obj, path) {
+function readPath(obj, path) {
   let cursor = obj;
   for (const key of path.split('.')) {
     if (cursor == null) return cursor;
@@ -1104,7 +1101,7 @@ function getDotted(obj, path) {
   }
   return cursor;
 }
-function setDotted(obj, path, value) {
+function writePath(obj, path, value) {
   const keys = path.split('.');
   const last = keys.pop();
   let target = obj;
@@ -1112,24 +1109,24 @@ function setDotted(obj, path, value) {
   target[last] = value;
 }
 
-// The save file, as {key, path, fallback} rows.
+// The save file, as [key, path, fallback] rows.
 // 'keep' means the current value (a fresh game keeps its own cash and spot).
-const SAVE_FIELDS = [
-  {key: 'cash', path: 'player.cash', fallback: 'keep'},
-  {key: 'rp', path: 'player.rp', fallback: 0},
-  {key: 'missionIndex', path: 'missionIndex', fallback: 0},
-  {key: 'missionStep', path: 'missionStep', fallback: 0},
-  {key: 'x', path: 'player.x', fallback: 'keep'},
-  {key: 'z', path: 'player.z', fallback: 'keep'},
-  {key: 'allMissionsDone', path: 'allMissionsDone', fallback: false},
-  {key: 'radioStation', path: 'player.radioStation', fallback: 0},
-  {key: 'weaponIndex', path: 'player.weaponIndex', fallback: 1},
+const SAVE_ROWS = [
+  ['cash', 'player.cash', 'keep'],
+  ['rp', 'player.rp', 0],
+  ['missionIndex', 'missionIndex', 0],
+  ['missionStep', 'missionStep', 0],
+  ['x', 'player.x', 'keep'],
+  ['z', 'player.z', 'keep'],
+  ['allMissionsDone', 'allMissionsDone', false],
+  ['radioStation', 'player.radioStation', 0],
+  ['weaponIndex', 'player.weaponIndex', 1],
 ];
 
 export function saveGame(state) {
   try {
     const data = {};
-    for (const field of SAVE_FIELDS) data[field.key] = getDotted(state, field.path);
+    for (const [key, path] of SAVE_ROWS) data[key] = readPath(state, path);
     data.garage = state.player.garage;
     data.weapons = state.player.weapons.map((w) => ({owned: w.owned, ammo: w.ammo, mag: w.mag}));
     data.districtHeat = state.districtHeat;
@@ -1175,11 +1172,11 @@ export function loadGame() {
 
 export function applySave(state, save) {
   if (save === null || save === undefined) return;
-  for (const field of SAVE_FIELDS) {
-    const base = field.fallback === 'keep' ? getDotted(state, field.path) : field.fallback;
-    const stored = save[field.key];
+  for (const [key, path, fallback] of SAVE_ROWS) {
+    const base = fallback === 'keep' ? readPath(state, path) : fallback;
+    const stored = save[key];
     const value = stored === undefined || stored === null ? base : stored;
-    setDotted(state, field.path, field.key === 'allMissionsDone' ? !!value : value);
+    writePath(state, path, key === 'allMissionsDone' ? !!value : value);
   }
   if (save.garage) state.player.garage = {...state.player.garage, ...save.garage};
   if (Array.isArray(save.weapons)) {

@@ -1,19 +1,20 @@
-// Kota Solmar Bay: jalan, blok, gedung instanced, palem, lampu, laut,
-// pantai, dermaga, awan, papan nama, rel trem, dan halte. Gedung
-// memakai THREE.InstancedMesh (satu draw call per warna fasad), jadi
-// seluruh kota hanya butuh segelintir call, bukan ratusan. Semua posisi
-// diambil dari RNG ber-seed, jadi ?seed=N selalu membangun kota yang
-// sama.
+// Solmar Bay, built: streets, blocks, instanced towers, palms,
+// lamps, the beach and sea, the pier, clouds, signs, tram rails and
+// stops. Towers share one InstancedMesh per facade colour, so the
+// whole city costs a handful of draw calls instead of hundreds. Every
+// position comes from the seeded RNG, so ?seed=N always rebuilds the
+// same city.
 import * as THREE from 'three';
 import { CITY, DISTRICTS, PALETTE } from './config.js';
 
-const LAWN_COLOR = 0x6b7c5e;
-const ASPHALT_COLOR = 0x33363d;
-const DASH_COLOR = 0xf5d76e;
-const BEACH_COLOR = 0xe8cf9a;
-const SEA_COLOR = 0x2a7fa8;
+const GRASS_TONE = 0x6b7c5e;
+const ROAD_TONE = 0x33363d;
+const LINE_TONE = 0xf5d76e;
+const SAND_TONE = 0xe8cf9a;
+const SEA_TONE = 0x2a7fa8;
 
-function solidBox(w, h, d, color, opts = {}) {
+// A solid box that casts and catches shadows.
+function brick(w, h, d, color, opts = {}) {
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
     new THREE.MeshLambertMaterial({color, ...opts}),
@@ -23,7 +24,8 @@ function solidBox(w, h, d, color, opts = {}) {
   return mesh;
 }
 
-function groundSheet(w, d, color, opts = {}) {
+// A flat sheet lying on the ground, catching shadows.
+function sheet(w, d, color, opts = {}) {
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(w, d),
     new THREE.MeshLambertMaterial({color, ...opts}),
@@ -33,28 +35,28 @@ function groundSheet(w, d, color, opts = {}) {
   return mesh;
 }
 
-// Satu InstancedMesh dari daftar matriks, ditambahkan ke scene.
-function scatter(scene, geo, mat, matrices, shadow = false) {
+// One InstancedMesh from a list of matrices, added to the stage.
+function batch(stage, geo, mat, matrices, shadow = false) {
   const mesh = new THREE.InstancedMesh(geo, mat, matrices.length);
   for (let i = 0; i < matrices.length; i += 1) mesh.setMatrixAt(i, matrices[i]);
   mesh.castShadow = shadow;
   mesh.receiveShadow = true;
   mesh.instanceMatrix.needsUpdate = true;
-  scene.add(mesh);
+  stage.add(mesh);
   return mesh;
 }
 
-// Matriks datar: posisi di tanah, menghadap ke atas, skala (w, d).
-function groundQuad(x, z, w, d) {
+// A flat matrix: a ground-facing quad at (x, z), scaled (w, d).
+function flatQuad(x, z, w, d) {
   const m = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
   m.premultiply(new THREE.Matrix4().makeTranslation(x, 0.02, z));
   m.multiply(new THREE.Matrix4().makeScale(w, d, 1));
   return m;
 }
 
-// Tekstur jendela: satu kanvas dipakai bersama oleh semua menara, jadi
-// tiap gedung punya jendela menyala tanpa tekstur per gedung.
-function makeWindowSkin(rng) {
+// Window texture: one shared canvas gives every tower lit windows
+// without a texture per building.
+function windowTexture(rng) {
   const c = document.createElement('canvas');
   c.width = 128;
   c.height = 256;
@@ -76,7 +78,8 @@ function makeWindowSkin(rng) {
   return tex;
 }
 
-function makeLabel(text, bg = '#1b2b4a', fg = '#ffd76e') {
+// A sign board texture with centred text.
+function signTexture(text, bg = '#1b2b4a', fg = '#ffd76e') {
   const c = document.createElement('canvas');
   c.width = 256;
   c.height = 64;
@@ -93,73 +96,74 @@ function makeLabel(text, bg = '#1b2b4a', fg = '#ffd76e') {
   return tex;
 }
 
-function layStreets(scene) {
-  const lawn = groundSheet(CITY.half * 2 + 60, CITY.half * 2 + 60, LAWN_COLOR);
-  scene.add(lawn);
+function paveRoads(stage) {
+  const lawn = sheet(CITY.half * 2 + 60, CITY.half * 2 + 60, GRASS_TONE);
+  stage.add(lawn);
   for (let i = 0; i < CITY.roads.length; i += 1) {
     const c = CITY.roads[i];
-    const v = groundSheet(CITY.roadWidth, CITY.half * 2, ASPHALT_COLOR);
+    const v = sheet(CITY.roadWidth, CITY.half * 2, ROAD_TONE);
     v.position.set(c, 0.01, 0);
-    scene.add(v);
-    const h = groundSheet(CITY.half * 2, CITY.roadWidth, ASPHALT_COLOR);
+    stage.add(v);
+    const h = sheet(CITY.half * 2, CITY.roadWidth, ROAD_TONE);
     h.position.set(0, 0.01, c);
-    scene.add(h);
+    stage.add(h);
   }
-  // Garis putus-putus tengah jalan: satu InstancedMesh untuk ~420
-  // garis, bukan 420 mesh terpisah.
+  // Centre dashes: one InstancedMesh for ~420 dashes, not 420 meshes.
   const dashMatrices = [];
   for (const c of CITY.roads) {
     for (let d = -CITY.half + 6; d < CITY.half; d += 12) {
-      dashMatrices.push(groundQuad(c, d, 0.5, 3));
-      dashMatrices.push(groundQuad(d, c, 3, 0.5));
+      dashMatrices.push(flatQuad(c, d, 0.5, 3));
+      dashMatrices.push(flatQuad(d, c, 3, 0.5));
     }
   }
-  scatter(scene, new THREE.PlaneGeometry(1, 1), new THREE.MeshLambertMaterial({color: DASH_COLOR}), dashMatrices);
+  batch(stage, new THREE.PlaneGeometry(1, 1), new THREE.MeshLambertMaterial({color: LINE_TONE}), dashMatrices);
 }
 
-// Rel trem: dua strip baja di tengah jalan loop (x = ±104, z = ±104),
-// plus papan halte di tiap sudut.
-function layRails(scene) {
+// Tram rails: two steel strips down the middle of the loop road
+// (x = ±104, z = ±104), plus a stop board at each corner.
+function setRails(stage) {
   const half = 104;
   const steel = new THREE.MeshLambertMaterial({color: 0x5a5f68});
   const railMatrices = [];
   for (const side of [-half, half]) {
     for (const off of [-0.9, 0.9]) {
-      railMatrices.push(groundQuad(side + off, 0, 0.35, half * 2));
-      railMatrices.push(groundQuad(0, side + off, half * 2, 0.35));
+      railMatrices.push(flatQuad(side + off, 0, 0.35, half * 2));
+      railMatrices.push(flatQuad(0, side + off, half * 2, 0.35));
     }
   }
-  scatter(scene, new THREE.PlaneGeometry(1, 1), steel, railMatrices);
-  const halts = [
+  batch(stage, new THREE.PlaneGeometry(1, 1), steel, railMatrices);
+  const stops = [
     {x: -half - 8, z: half, text: 'TRAM · PLAZA SOUTH'},
     {x: half + 8, z: half, text: 'TRAM · MARINA EAST'},
     {x: half + 8, z: -half, text: 'TRAM · HOTEL NORTH'},
     {x: -half - 8, z: -half, text: 'TRAM · DOCKS WEST'},
   ];
-  for (const s of halts) {
-    const post = solidBox(0.25, 2.6, 0.25, 0x2a7fa8);
+  for (const s of stops) {
+    const post = brick(0.25, 2.6, 0.25, 0x2a7fa8);
     post.position.set(s.x, 1.3, s.z);
-    scene.add(post);
+    stage.add(post);
     const board = new THREE.Mesh(
       new THREE.PlaneGeometry(7, 1.6),
-      new THREE.MeshBasicMaterial({map: makeLabel(s.text, '#14586e', '#ffffff'), side: THREE.DoubleSide}),
+      new THREE.MeshBasicMaterial({map: signTexture(s.text, '#14586e', '#ffffff'), side: THREE.DoubleSide}),
     );
     board.position.set(s.x, 3, s.z);
     board.rotation.y = Math.PI / 4;
-    scene.add(board);
+    stage.add(board);
   }
 }
 
-function growTowers(scene, rng) {
+// Towers, one InstancedMesh per facade colour. Returns the collision
+// boxes the world uses to keep cars and feet out of buildings.
+function raiseTowers(stage, rng) {
   const colliders = [];
-  const skin = makeWindowSkin(rng);
+  const skin = windowTexture(rng);
   const facades = [0x9aa3ad, 0xb0a89a, 0x8a9bb0, 0xa89080, 0x7a8a9a, 0xc0b49a];
   const byColour = new Map();
   const trimMatrices = [];
   const roofMatrices = [];
   for (const bx of CITY.blockCentres) {
     for (const bz of CITY.blockCentres) {
-      if (bx === 0 && bz === 0) continue; // plaza tengah tetap terbuka
+      if (bx === 0 && bz === 0) continue; // the central plaza stays open
       const landmark = (bx === 26 && bz === -26) || (bx === 130 && bz === -78);
       const bw = landmark ? 34 : 24 + rng.next() * 8;
       const bd = landmark ? 34 : 24 + rng.next() * 8;
@@ -169,8 +173,8 @@ function growTowers(scene, rng) {
       m.multiply(new THREE.Matrix4().makeScale(bw / 16, height / 16, bd / 16));
       if (!byColour.has(color)) byColour.set(color, []);
       byColour.get(color).push(m);
-      // Lis atap + kotak rooftop, supaya menara terbaca sebagai gedung.
-      // Keduanya di-instance di bawah, bukan satu mesh per blok.
+      // Roof trim and a rooftop box, so towers read as buildings.
+      // Both are instanced below, not one mesh per block.
       const trim = new THREE.Matrix4().makeTranslation(bx, height + 0.25, bz);
       trim.multiply(new THREE.Matrix4().makeScale(bw + 0.6, 0.5, bd + 0.6));
       trimMatrices.push(trim);
@@ -184,7 +188,6 @@ function growTowers(scene, rng) {
       colliders.push({x0: bx - bw / 2, x1: bx + bw / 2, z0: bz - bd / 2, z1: bz + bd / 2});
     }
   }
-  // Satu InstancedMesh per warna fasad.
   const unit = new THREE.BoxGeometry(16, 16, 16);
   for (const [color, matrices] of byColour) {
     const material = new THREE.MeshLambertMaterial({color, map: skin});
@@ -193,15 +196,15 @@ function growTowers(scene, rng) {
     inst.castShadow = true;
     inst.receiveShadow = true;
     inst.instanceMatrix.needsUpdate = true;
-    scene.add(inst);
+    stage.add(inst);
   }
-  scatter(scene, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x6b5a44}), trimMatrices, true);
-  scatter(scene, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x8a8f98}), roofMatrices, true);
+  batch(stage, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x6b5a44}), trimMatrices, true);
+  batch(stage, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({color: 0x8a8f98}), roofMatrices, true);
   return {colliders};
 }
 
-function postSigns(scene) {
-  // Papan nama distrik di tiang, di sudut-sudut plaza.
+function plantSigns(stage) {
+  // District name boards on posts, at the plaza corners.
   const spots = [
     {x: -8, z: -8, text: 'CENTRAL PLAZA', ry: Math.PI / 4},
     {x: 120, z: -68, text: 'HOTEL ROW', ry: -Math.PI / 3},
@@ -210,20 +213,20 @@ function postSigns(scene) {
   ];
   for (let i = 0; i < spots.length; i += 1) {
     const s = spots[i];
-    const post = solidBox(0.3, 3, 0.3, 0x444444);
+    const post = brick(0.3, 3, 0.3, 0x444444);
     post.position.set(s.x, 1.5, s.z);
-    scene.add(post);
+    stage.add(post);
     const board = new THREE.Mesh(
       new THREE.PlaneGeometry(10, 2.5),
-      new THREE.MeshBasicMaterial({map: makeLabel(s.text), side: THREE.DoubleSide}),
+      new THREE.MeshBasicMaterial({map: signTexture(s.text), side: THREE.DoubleSide}),
     );
     board.position.set(s.x, 3.4, s.z);
     board.rotation.y = s.ry;
-    scene.add(board);
+    stage.add(board);
   }
 }
 
-function growPalms(scene, rng) {
+function plantPalms(stage, rng) {
   const trunkMat = new THREE.MeshLambertMaterial({color: 0x7a5a3a});
   const leafMat = new THREE.MeshLambertMaterial({color: 0x3f8a4a, side: THREE.DoubleSide});
   const spots = [];
@@ -237,7 +240,7 @@ function growPalms(scene, rng) {
     const side = rng.next() < 0.5 ? -9 : 9;
     spots.push([road + side, -170 + rng.next() * 340]);
   }
-  // One instanced trunk and one instanced leaf set for every palm,
+  // One instanced trunk and one instanced leaf set per palm,
   // not seven meshes per tree.
   const trunkMatrices = [];
   const leafMatrices = [];
@@ -259,28 +262,30 @@ function growPalms(scene, rng) {
       ));
     }
   }
-  scatter(scene, new THREE.CylinderGeometry(0.25, 0.4, 5, 6), trunkMat, trunkMatrices, true);
-  scatter(scene, new THREE.PlaneGeometry(3.4, 0.9), leafMat, leafMatrices);
+  batch(stage, new THREE.CylinderGeometry(0.25, 0.4, 5, 6), trunkMat, trunkMatrices, true);
+  batch(stage, new THREE.PlaneGeometry(3.4, 0.9), leafMat, leafMatrices);
 }
 
-function lineLamps(scene) {
+function setLamps(stage) {
   const poleMat = new THREE.MeshLambertMaterial({color: 0x2a2f3a});
   const bulbMat = new THREE.MeshBasicMaterial({color: 0xffe9b0});
-  const poleMatrices = [];
-  const bulbMatrices = [];
+  // One lamp post per road, every 52 m: pole matrix and bulb matrix
+  // share the same street position, 3 m apart in height.
+  const lampSpots = [];
   for (const c of CITY.roads) {
     for (let d = -CITY.half + 26; d < CITY.half; d += 52) {
-      poleMatrices.push(new THREE.Matrix4().makeTranslation(c + 7, 3, d));
-      bulbMatrices.push(new THREE.Matrix4().makeTranslation(c + 7, 6.2, d));
+      lampSpots.push({x: c + 7, z: d});
     }
   }
-  scatter(scene, new THREE.CylinderGeometry(0.12, 0.12, 6, 6), poleMat, poleMatrices);
-  scatter(scene, new THREE.SphereGeometry(0.35, 8, 6), bulbMat, bulbMatrices);
+  const poleMatrices = lampSpots.map((s) => new THREE.Matrix4().makeTranslation(s.x, 3, s.z));
+  const bulbMatrices = lampSpots.map((s) => new THREE.Matrix4().makeTranslation(s.x, 6.2, s.z));
+  batch(stage, new THREE.CylinderGeometry(0.12, 0.12, 6, 6), poleMat, poleMatrices);
+  batch(stage, new THREE.SphereGeometry(0.35, 8, 6), bulbMat, bulbMatrices);
 }
 
 // Beach umbrellas: colourful cones on poles along the sand, pure
 // decoration — they never move and never collide.
-function shadeBeach(scene) {
+function plantUmbrellas(stage) {
   const umbrellaColors = [0xff5fa2, 0xffd76e, 0x7dd8ff, 0xff7a2b];
   for (let i = 0; i < 4; i += 1) {
     const ux = -120 + i * 80;
@@ -289,39 +294,39 @@ function shadeBeach(scene) {
       new THREE.MeshLambertMaterial({color: 0x8a6b4a}),
     );
     pole.position.set(ux, 1.1, 188);
-    scene.add(pole);
+    stage.add(pole);
     const canopy = new THREE.Mesh(
       new THREE.ConeGeometry(2.2, 1, 8),
       new THREE.MeshLambertMaterial({color: umbrellaColors[i % umbrellaColors.length]}),
     );
     canopy.position.set(ux, 2.6, 188);
-    scene.add(canopy);
+    stage.add(canopy);
   }
 }
 
-function makeShore(scene, rng) {
+function buildShore(stage, rng) {
   // Sand sheet and the sea behind it.
-  const sand = groundSheet(CITY.half * 2 + 60, 30, BEACH_COLOR);
+  const sand = sheet(CITY.half * 2 + 60, 30, SAND_TONE);
   sand.position.set(0, 0.02, CITY.beachZ + 8);
-  scene.add(sand);
+  stage.add(sand);
   const ocean = new THREE.Mesh(
     new THREE.PlaneGeometry(900, 120),
-    new THREE.MeshLambertMaterial({color: SEA_COLOR}),
+    new THREE.MeshLambertMaterial({color: SEA_TONE}),
   );
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.set(0, -0.4, CITY.oceanZ + 40);
   ocean.name = 'ocean';
-  scene.add(ocean);
-  shadeBeach(scene);
+  stage.add(ocean);
+  plantUmbrellas(stage);
   // The pier: a wooden deck on posts, reaching out to sea at x = 0.
-  const deck = solidBox(8, 0.6, 34, 0x8a6b4a);
+  const deck = brick(8, 0.6, 34, 0x8a6b4a);
   deck.position.set(0, 0.8, 196);
-  scene.add(deck);
+  stage.add(deck);
   for (let z = 182; z <= 210; z += 7) {
     for (const x of [-3.4, 3.4]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 2.4, 6), new THREE.MeshLambertMaterial({color: 0x6b4a2a}));
       post.position.set(x, -0.2, z);
-      scene.add(post);
+      stage.add(post);
     }
   }
   // Boats sailing the bay: each boat is a group the renderer moves
@@ -336,20 +341,21 @@ function makeShore(scene, rng) {
     const boat = new THREE.Group();
     boat.name = 'boat-' + i;
     boat.userData = {lane, speed, phase};
-    const hull = solidBox(3, 1.2, 8, color);
+    const hull = brick(3, 1.2, 8, color);
     hull.position.set(0, 0.2, 0);
     boat.add(hull);
-    const cabin = solidBox(2, 1, 3, 0xffffff);
+    const cabin = brick(2, 1, 3, 0xffffff);
     cabin.position.set(0, 1.2, 0);
     boat.add(cabin);
     boat.position.set(phase - 130, 0, lane);
-    scene.add(boat);
+    stage.add(boat);
   }
 }
 
-// yang menggantung di pelek. Grup rotor diputar di render.js; kabin
-// berputar berlawanan di sana supaya tetap tegak.
-function spinWheel(scene) {
+// The ferris wheel on the pier: legs, a turning rotor, spokes and
+// cabins. The rotor group spins in render.js; the cabins counter-spin
+// there so they stay upright.
+function buildWheel(stage) {
   const wheel = new THREE.Group();
   wheel.name = 'ferris-wheel';
   wheel.position.set(0, 0, 210);
@@ -389,12 +395,12 @@ function spinWheel(scene) {
   }
   rotor.userData.cabins = cabins;
   wheel.add(rotor);
-  scene.add(wheel);
+  stage.add(wheel);
 }
 
-// Mercusuar dermaga: menara bergaris dengan ruang lampu, dan sorot di
-// atas pivot yang disapu renderer melintasi teluk.
-function raiseBeacon(scene) {
+// The pier lighthouse: a striped tower with a lamp room, and a beam
+// on a pivot the renderer sweeps across the bay.
+function buildBeacon(stage) {
   const tower = new THREE.Group();
   tower.name = 'lighthouse';
   tower.position.set(6, 0, 208);
@@ -420,7 +426,7 @@ function raiseBeacon(scene) {
   );
   lamp.position.y = 13.2;
   tower.add(lamp);
-  // Sorotnya: kerucut tembus pandang, puncak di lampu, menyapu dengan pivot.
+  // The beam: a see-through cone, tip at the lamp, swept by the pivot.
   const pivot = new THREE.Group();
   pivot.name = 'lighthouse-beam-pivot';
   pivot.position.set(0, 13.2, 0);
@@ -432,12 +438,11 @@ function raiseBeacon(scene) {
   beam.position.set(13, 0, 0);
   pivot.add(beam);
   tower.add(pivot);
-  scene.add(tower);
+  stage.add(tower);
 }
 
-function makePlaza(scene) {
-  // Plaza tengah: cakram beraspal dengan air mancur, dibiarkan terbuka
-  // untuk aksi.
+function buildPlaza(stage) {
+  // Central plaza: a paved disc with a fountain, left open for action.
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(16, 24),
     new THREE.MeshLambertMaterial({color: 0x9a938a}),
@@ -445,23 +450,23 @@ function makePlaza(scene) {
   disc.rotation.x = -Math.PI / 2;
   disc.position.set(0, 0.02, 0);
   disc.receiveShadow = true;
-  scene.add(disc);
+  stage.add(disc);
   const rim = new THREE.Mesh(
     new THREE.CylinderGeometry(4, 4.4, 1, 20),
     new THREE.MeshLambertMaterial({color: 0x7a8a9a}),
   );
   rim.position.set(0, 0.5, 0);
-  scene.add(rim);
+  stage.add(rim);
   const water = new THREE.Mesh(
     new THREE.CircleGeometry(3.6, 20),
     new THREE.MeshLambertMaterial({color: 0x2a7fa8}),
   );
   water.rotation.x = -Math.PI / 2;
   water.position.set(0, 1.05, 0);
-  scene.add(water);
+  stage.add(water);
 }
 
-function floatClouds(scene, rng) {
+function driftClouds(stage, rng) {
   const clouds = [];
   const mat = new THREE.MeshLambertMaterial({color: 0xffd9c0, transparent: true, opacity: 0.85});
   for (let i = 0; i < 8; i += 1) {
@@ -473,23 +478,23 @@ function floatClouds(scene, rng) {
       cloud.add(puff);
     }
     cloud.position.set(-240 + rng.next() * 480, 55 + rng.next() * 25, -200 + rng.next() * 320);
-    scene.add(cloud);
+    stage.add(cloud);
     clouds.push(cloud);
   }
   return clouds;
 }
 
-export function buildCity(scene, rng) {
-  layStreets(scene);
-  const {colliders} = growTowers(scene, rng);
-  layRails(scene);
-  postSigns(scene);
-  growPalms(scene, rng);
-  lineLamps(scene);
-  makeShore(scene, rng);
-  spinWheel(scene);
-  raiseBeacon(scene);
-  makePlaza(scene);
-  const clouds = floatClouds(scene, rng);
+export function buildCity(stage, rng) {
+  paveRoads(stage);
+  const {colliders} = raiseTowers(stage, rng);
+  setRails(stage);
+  plantSigns(stage);
+  plantPalms(stage, rng);
+  setLamps(stage);
+  buildShore(stage, rng);
+  buildWheel(stage);
+  buildBeacon(stage);
+  buildPlaza(stage);
+  const clouds = driftClouds(stage, rng);
   return {colliders, clouds};
 }
