@@ -26,7 +26,7 @@ function gearFor(speed) {
 
 export function createHud(state, callbacks) {
   const $ = (id) => document.getElementById(id);
-  const els = {
+  const el = {
     hud: $('hud'), controls: $('controls'),
     cash: $('cash'), healthFill: $('health-fill'), healthText: $('health-text'),
     respectName: $('respect-name'), respectFill: $('respect-fill'), respectText: $('respect-text'),
@@ -43,34 +43,40 @@ export function createHud(state, callbacks) {
     dialogueName: $('dialogue-name'), dialogueText: $('dialogue-text'),
     message: $('message'), minimap: $('minimap'), crosshair: $('crosshair'),
     flash: $('flash'), flashTitle: $('flash-title'), flashReward: $('flash-reward'),
-    screens: { title: $('screen-title'), pause: $('screen-pause'), wasted: $('screen-wasted'),
+    screens: {title: $('screen-title'), pause: $('screen-pause'), wasted: $('screen-wasted'),
       busted: $('screen-busted'), complete: $('screen-complete'),
-      garage: $('screen-garage'), missions: $('screen-missions') },
+      garage: $('screen-garage'), missions: $('screen-missions')},
     titleCash: $('title-cash'), titleMission: $('title-mission'),
     finalCash: $('final-cash'), finalMissions: $('final-missions'),
     garageList: $('garage-list'), garageMsg: $('garage-msg'),
     missionsList: $('missions-list'),
   };
-  const mapCtx = els.minimap.getContext('2d');
+  const mapCtx = el.minimap.getContext('2d');
   let messageTimer = 0;
   let mapTimer = 0;
   const cache = {};
   // Diagnostics handle for headless tests (backdrop-guard timing).
   window.__hudCache = cache;
-  const setText = (key, el, text) => {
-    if (cache[key] !== text) { cache[key] = text; el.textContent = text; }
+  const setText = (key, node, text) => {
+    if (cache[key] !== text) {
+      cache[key] = text;
+      node.textContent = text;
+    }
   };
-  const setHtml = (key, el, html) => {
-    if (cache[key] !== html) { cache[key] = html; el.innerHTML = html; }
+  const setHtml = (key, node, html) => {
+    if (cache[key] !== html) {
+      cache[key] = html;
+      node.innerHTML = html;
+    }
   };
 
   function showMessage(text, seconds) {
-    els.message.textContent = text;
-    els.message.style.opacity = '1';
+    el.message.textContent = text;
+    el.message.style.opacity = '1';
     messageTimer = seconds || 3;
   }
   function showGarageMessage(text) {
-    if (els.garageMsg) els.garageMsg.textContent = text || '';
+    if (el.garageMsg) el.garageMsg.textContent = text || '';
   }
 
   function drawMinimap() {
@@ -78,24 +84,29 @@ export function createHud(state, callbacks) {
     const scale = size / (CITY.half * 2 + 40);
     const toMap = (x, z) => [size / 2 + x * scale, size / 2 + z * scale];
     mapCtx.clearRect(0, 0, size, size);
-    mapCtx.fillStyle = '#274b2e'; mapCtx.fillRect(0, 0, size, size);
-    // Ocean and beach at the south edge.
+    mapCtx.fillStyle = '#274b2e';
+    mapCtx.fillRect(0, 0, size, size);
     mapCtx.fillStyle = '#1e7fa8';
     const [, beachY] = toMap(0, CITY.beachZ);
     mapCtx.fillRect(0, beachY, size, size - beachY);
     mapCtx.fillStyle = '#e8cf9a';
     mapCtx.fillRect(0, beachY - 4, size, 4);
-    // Roads.
-    mapCtx.strokeStyle = '#3a3f47'; mapCtx.lineWidth = 5;
+    mapCtx.strokeStyle = '#3a3f47';
+    mapCtx.lineWidth = 5;
     for (const c of CITY.roads) {
       const [x1, y1] = toMap(c, -CITY.half);
       const [x2, y2] = toMap(c, CITY.half);
-      mapCtx.beginPath(); mapCtx.moveTo(x1, y1); mapCtx.lineTo(x2, y2); mapCtx.stroke();
+      mapCtx.beginPath();
+      mapCtx.moveTo(x1, y1);
+      mapCtx.lineTo(x2, y2);
+      mapCtx.stroke();
       const [x3, y3] = toMap(-CITY.half, c);
       const [x4, y4] = toMap(CITY.half, c);
-      mapCtx.beginPath(); mapCtx.moveTo(x3, y3); mapCtx.lineTo(x4, y4); mapCtx.stroke();
+      mapCtx.beginPath();
+      mapCtx.moveTo(x3, y3);
+      mapCtx.lineTo(x4, y4);
+      mapCtx.stroke();
     }
-    // Buildings.
     mapCtx.fillStyle = '#8a8f98';
     for (const col of state.colliders) {
       const [x, y] = toMap(col.x0, col.z0);
@@ -104,9 +115,12 @@ export function createHud(state, callbacks) {
     // Police search zone (Eyes Out reveal) — a red dashed ring around Rico.
     if (state.player.eyesTimer > 0) {
       const [px, py] = toMap(state.player.x, state.player.z);
-      mapCtx.strokeStyle = '#ff4444'; mapCtx.lineWidth = 2;
+      mapCtx.strokeStyle = '#ff4444';
+      mapCtx.lineWidth = 2;
       mapCtx.setLineDash([4, 4]);
-      mapCtx.beginPath(); mapCtx.arc(px, py, 60 * scale, 0, Math.PI * 2); mapCtx.stroke();
+      mapCtx.beginPath();
+      mapCtx.arc(px, py, 60 * scale, 0, Math.PI * 2);
+      mapCtx.stroke();
       mapCtx.setLineDash([]);
     }
     // Mission beacon.
@@ -114,17 +128,25 @@ export function createHud(state, callbacks) {
     if (target) {
       const [x, y] = toMap(target.x, target.z);
       mapCtx.fillStyle = '#ffd76e';
-      mapCtx.beginPath(); mapCtx.arc(x, y, 5, 0, Math.PI * 2); mapCtx.fill();
-      mapCtx.strokeStyle = '#ffd76e'; mapCtx.lineWidth = 2;
-      mapCtx.beginPath(); mapCtx.arc(x, y, 9, 0, Math.PI * 2); mapCtx.stroke();
+      mapCtx.beginPath();
+      mapCtx.arc(x, y, 5, 0, Math.PI * 2);
+      mapCtx.fill();
+      mapCtx.strokeStyle = '#ffd76e';
+      mapCtx.lineWidth = 2;
+      mapCtx.beginPath();
+      mapCtx.arc(x, y, 9, 0, Math.PI * 2);
+      mapCtx.stroke();
     }
     // Cars, police (red), roadblocks (orange), courier target (white ring).
     for (const car of state.cars) {
       if (car.kind === 'player') continue;
       const [x, y] = toMap(car.x, car.z);
       if (car === state.targetCar) {
-        mapCtx.strokeStyle = '#fff'; mapCtx.lineWidth = 2;
-        mapCtx.beginPath(); mapCtx.arc(x, y, 5, 0, Math.PI * 2); mapCtx.stroke();
+        mapCtx.strokeStyle = '#fff';
+        mapCtx.lineWidth = 2;
+        mapCtx.beginPath();
+        mapCtx.arc(x, y, 5, 0, Math.PI * 2);
+        mapCtx.stroke();
       }
       mapCtx.fillStyle = car.kind === 'police' ? (car.roadblock ? '#ff9a3d' : '#ff4444') : '#dfe6ee';
       mapCtx.fillRect(x - 2, y - 2, 4, 4);
@@ -142,141 +164,162 @@ export function createHud(state, callbacks) {
     mapCtx.translate(px, py);
     mapCtx.rotate(Math.atan2(Math.sin(state.player.angle), Math.cos(state.player.angle)));
     mapCtx.fillStyle = '#2bd97a';
-    mapCtx.beginPath(); mapCtx.moveTo(0, -7); mapCtx.lineTo(5, 6); mapCtx.lineTo(-5, 6); mapCtx.closePath(); mapCtx.fill();
+    mapCtx.beginPath();
+    mapCtx.moveTo(0, -7);
+    mapCtx.lineTo(5, 6);
+    mapCtx.lineTo(-5, 6);
+    mapCtx.closePath();
+    mapCtx.fill();
     mapCtx.restore();
-    // North marker.
-    mapCtx.fillStyle = '#fff'; mapCtx.font = 'bold 11px system-ui, sans-serif';
+    mapCtx.fillStyle = '#fff';
+    mapCtx.font = 'bold 11px system-ui, sans-serif';
     mapCtx.fillText('N', 6, 14);
   }
 
-  function update(dt, screen) {
-    const p = state.player;
-    // The in-game HUD only exists during play; menus get a clean frame.
-    els.hud.style.display = screen === 'play' ? 'block' : 'none';
-    // The keyboard hint is a play aid, not a screenshot prop.
-    if (els.controls) els.controls.style.display = window.__isShot ? 'none' : '';
-    setText('cash', els.cash, `$${p.cash.toLocaleString('en-US')}`);
-    els.healthFill.style.width = `${Math.max(0, p.health)}%`;
-    setText('hp', els.healthText, `HP ${Math.ceil(Math.max(0, p.health))}`);
-    // Respect rank + RP bar.
-    const { rank, next } = rankFor(p.rp || 0);
-    setText('rank', els.respectName, `RANK · ${rank.name}`);
+  // Cash, health, respect rank, wanted stars and the clock.
+  function updateVitals(rico) {
+    setText('cash', el.cash, `$${rico.cash.toLocaleString('en-US')}`);
+    el.healthFill.style.width = `${Math.max(0, rico.health)}%`;
+    setText('hp', el.healthText, `HP ${Math.ceil(Math.max(0, rico.health))}`);
+    const {rank, next} = rankFor(rico.rp || 0);
+    setText('rank', el.respectName, `RANK · ${rank.name}`);
     const span = next ? next.rp - rank.rp : 100;
-    const prog = next ? Math.min(100, ((p.rp - rank.rp) / span) * 100) : 100;
-    els.respectFill.style.width = `${prog}%`;
-    setText('rp', els.respectText, next
-      ? `${p.rp.toLocaleString('en-US')} / ${next.rp.toLocaleString('en-US')} RP`
-      : `${p.rp.toLocaleString('en-US')} RP — max rank`);
-    // Wanted stars + clock.
-    setText('stars', els.stars, '★'.repeat(p.wanted) + '☆'.repeat(WANTED.maxStars - p.wanted));
-    els.stars.style.color = p.wanted > 0 ? '#ffcf3d' : 'rgba(255,255,255,0.35)';
-    setText('clock', els.clock, fmtClock(state.clockMinutes));
-    // Weapon slots.
-    const wHtml = p.weapons.map((w, i) => {
-      const cls = `slot${i === p.weaponIndex ? ' current' : ''}${w.owned ? '' : ' locked'}`;
+    const prog = next ? Math.min(100, ((rico.rp - rank.rp) / span) * 100) : 100;
+    el.respectFill.style.width = `${prog}%`;
+    setText('rp', el.respectText, next
+      ? `${rico.rp.toLocaleString('en-US')} / ${next.rp.toLocaleString('en-US')} RP`
+      : `${rico.rp.toLocaleString('en-US')} RP — max rank`);
+    setText('stars', el.stars, '★'.repeat(rico.wanted) + '☆'.repeat(WANTED.maxStars - rico.wanted));
+    el.stars.style.color = rico.wanted > 0 ? '#ffcf3d' : 'rgba(255,255,255,0.35)';
+    setText('clock', el.clock, fmtClock(state.clockMinutes));
+  }
+
+  // Weapon slots: owned weapons show ammo, locked ones show the RP gate.
+  function updateWeapons(rico) {
+    const html = rico.weapons.map((w, i) => {
+      const cls = `slot${i === rico.weaponIndex ? ' current' : ''}${w.owned ? '' : ' locked'}`;
       const ammo = !w.owned ? `LOCKED · ${w.unlockRp} RP` : (w.id === 'fists' ? '∞' : `${w.mag} / ${w.ammo}`);
       return `<div class="${cls}"><span>${i + 1} ${w.short}</span><span class="ammo">${ammo}</span></div>`;
     }).join('');
-    setHtml('weapons', els.weapons, wHtml);
-    // Mission header.
+    setHtml('weapons', el.weapons, html);
+  }
+
+  // Mission header: chapter, title, stage bar, objective, next step, timer.
+  function updateMissionHeader() {
     const mission = currentMission(state);
-    if (mission) {
-      setText('mch', els.missionChapter, `${mission.chapter} · MISSION ${state.missionIndex + 1}/${MISSIONS.length} · ${mission.giver}`);
-      setText('mt', els.missionTitle, mission.title);
-      const step = mission.steps[state.missionStep];
-      const stagePct = ((state.missionStep) / mission.steps.length) * 100;
-      els.missionStageFill.style.width = `${stagePct}%`;
-      setText('mo', els.missionObjective, objectiveLabel(state));
-      setText('mn', els.missionNext, nextStepLabel(state));
-      const timed = step && (step.kind === 'race' || step.kind === 'timed') && step.seconds;
-      setText('mtimer', els.missionTimer, timed ? `⏱ ${fmtTimer(state.missionTimer)}` : '');
-    } else {
-      setText('mch', els.missionChapter, 'FREE ROAM');
-      setText('mt', els.missionTitle, 'Solmar Bay is yours');
-      els.missionStageFill.style.width = '100%';
-      setText('mo', els.missionObjective, 'Cause chaos or enjoy the sunset.');
-      setText('mn', els.missionNext, '');
-      setText('mtimer', els.missionTimer, '');
+    if (!mission) {
+      setText('mch', el.missionChapter, 'FREE ROAM');
+      setText('mt', el.missionTitle, 'Solmar Bay is yours');
+      el.missionStageFill.style.width = '100%';
+      setText('mo', el.missionObjective, 'Cause chaos or enjoy the sunset.');
+      setText('mn', el.missionNext, '');
+      setText('mtimer', el.missionTimer, '');
+      return;
     }
-    // Dispatch panel: real police units with distance + tactic.
+    setText('mch', el.missionChapter, `${mission.chapter} · MISSION ${state.missionIndex + 1}/${MISSIONS.length} · ${mission.giver}`);
+    setText('mt', el.missionTitle, mission.title);
+    const step = mission.steps[state.missionStep];
+    el.missionStageFill.style.width = `${(state.missionStep / mission.steps.length) * 100}%`;
+    setText('mo', el.missionObjective, objectiveLabel(state));
+    setText('mn', el.missionNext, nextStepLabel(state));
+    const timed = step && (step.kind === 'race' || step.kind === 'timed') && step.seconds;
+    setText('mtimer', el.missionTimer, timed ? `⏱ ${fmtTimer(state.missionTimer)}` : '');
+  }
+
+  // Dispatch panel: real police units with distance + tactic.
+  function updateDispatch(rico) {
     const police = state.cars.filter((c) => c.kind === 'police' && !c.disabled);
     const totalUnits = police.length + (state.heli.active ? 1 : 0);
-    const unitRows = [];
+    const rows = [];
     if (state.heli.active) {
-      const d = Math.round(Math.hypot(state.heli.x - p.x, state.heli.z - p.z));
-      unitRows.push(`<div class="unit"><span>AIR ONE</span><span>${d} m</span><span class="tactic">SPOTLIGHT</span></div>`);
+      const d = Math.round(Math.hypot(state.heli.x - rico.x, state.heli.z - rico.z));
+      rows.push(`<div class="unit"><span>AIR ONE</span><span>${d} m</span><span class="tactic">SPOTLIGHT</span></div>`);
     }
     for (const car of police) {
-      const d = Math.round(Math.hypot(car.x - p.x, car.z - p.z));
+      const d = Math.round(Math.hypot(car.x - rico.x, car.z - rico.z));
       const tactic = car.roadblock ? 'ROADBLOCK' : (d < 10 ? 'RAMMING' : (d < 40 ? 'PURSUIT' : 'RESPONDING'));
-      unitRows.push(`<div class="unit"><span>${unitName(car)}</span><span>${d} m</span><span class="tactic">${tactic}</span></div>`);
+      rows.push(`<div class="unit"><span>${unitName(car)}</span><span>${d} m</span><span class="tactic">${tactic}</span></div>`);
     }
-    setText('dtitle', els.dispatchTitle, p.wanted > 0
-      ? `SBPD DISPATCH — ${totalUnits} UNIT${totalUnits === 1 ? '' : 'S'} · ${p.wanted}★`
+    setText('dtitle', el.dispatchTitle, rico.wanted > 0
+      ? `SBPD DISPATCH — ${totalUnits} UNIT${totalUnits === 1 ? '' : 'S'} · ${rico.wanted}★`
       : 'SBPD DISPATCH — CLEAR');
-    setHtml('drows', els.dispatchRows, unitRows.length
-      ? unitRows.join('')
+    setHtml('drows', el.dispatchRows, rows.length
+      ? rows.join('')
       : '<div class="unit"><span>No units on you.</span><span></span><span></span></div>');
-    // Crew abilities with live cooldowns.
+  }
+
+  // Crew abilities with live cooldowns, and the district + heat readout.
+  function updateCrewAndDistrict(rico) {
     const crewHtml = CREW.map((c) => {
-      const cd = p.crew[c.id] || 0;
+      const cd = rico.crew[c.id] || 0;
       return `<div class="ability"><span><b>${c.key}</b> ${c.name} — ${c.who}</span><span class="cd">${cd > 0 ? Math.ceil(cd) + 's' : 'READY'}</span></div>`;
     }).join('');
-    setHtml('crew', els.crewRows, crewHtml);
-    // District.
-    const d = districtAt(p.x, p.z);
+    setHtml('crew', el.crewRows, crewHtml);
+    const d = districtAt(rico.x, rico.z);
     const heat = state.districtHeat[d.name] || 0;
-    setText('dn', els.districtName, d.name);
-    setText('dr', els.districtRoad, d.road);
-    setText('dh', els.districtHeat, `${heat < 30 ? 'NEUTRAL' : heat < 60 ? 'WARM' : 'HOT'} · HEAT ${heat}`);
-    // Car identity + speed.
-    if (p.car) {
-      const kmh = Math.round(Math.abs(p.car.speed) * 3.6);
-      setText('speed', els.speed, `${kmh} km/h`);
-      setText('cname', els.carName, p.car.name || 'STOLEN CAR');
-      const cond = Math.round(p.car.condition ?? 100);
-      setText('ccond', els.carCond, `CONDITION ${cond}% · ${gearFor(p.car.speed)} · TUNE ${p.garage.tune}`);
-      els.crosshair.style.display = 'none';
+    setText('dn', el.districtName, d.name);
+    setText('dr', el.districtRoad, d.road);
+    setText('dh', el.districtHeat, `${heat < 30 ? 'NEUTRAL' : heat < 60 ? 'WARM' : 'HOT'} · HEAT ${heat}`);
+  }
+
+  // Car identity + speed, the crosshair, and the radio line.
+  function updateCarAndRadio(rico, screen) {
+    if (rico.car) {
+      setText('speed', el.speed, `${Math.round(Math.abs(rico.car.speed) * 3.6)} km/h`);
+      setText('cname', el.carName, rico.car.name || 'STOLEN CAR');
+      setText('ccond', el.carCond, `CONDITION ${Math.round(rico.car.condition ?? 100)}% · ${gearFor(rico.car.speed)} · TUNE ${rico.garage.tune}`);
+      el.crosshair.style.display = 'none';
     } else {
-      setText('speed', els.speed, '');
-      setText('cname', els.carName, '');
-      setText('ccond', els.carCond, '');
+      setText('speed', el.speed, '');
+      setText('cname', el.carName, '');
+      setText('ccond', el.carCond, '');
       // No crosshair in staged screenshots — it is a gameplay aid, not a prop.
-      els.crosshair.style.display = (screen === 'play' && !window.__isShot) ? 'block' : 'none';
+      el.crosshair.style.display = (screen === 'play' && !window.__isShot) ? 'block' : 'none';
     }
-    // Radio line.
-    const station = RADIO[p.radioStation];
+    const station = RADIO[rico.radioStation];
     const track = station.tracks[Math.floor(state.time / 45) % station.tracks.length];
-    setText('radio', els.radioLine, `♪ ${station.name} — "${track}"`);
-    // Dialogue box.
+    setText('radio', el.radioLine, `♪ ${station.name} — "${track}"`);
+  }
+
+  // Dialogue box, the transient message line, and the mission-complete flash.
+  function updateDialogueAndFlash(dt) {
     if (state.dialogue && state.dialogue.timer > 0) {
-      els.dialogue.style.display = 'flex';
-      setText('dport', els.dialoguePortrait, (state.dialogue.name || 'L')[0]);
-      setText('dname', els.dialogueName, `${state.dialogue.name} · ${state.dialogue.role}`);
-      setText('dtext', els.dialogueText, `“${state.dialogue.text}”`);
+      el.dialogue.style.display = 'flex';
+      setText('dport', el.dialoguePortrait, (state.dialogue.name || 'L')[0]);
+      setText('dname', el.dialogueName, `${state.dialogue.name} · ${state.dialogue.role}`);
+      setText('dtext', el.dialogueText, `“${state.dialogue.text}”`);
     } else {
-      els.dialogue.style.display = 'none';
+      el.dialogue.style.display = 'none';
     }
     if (messageTimer > 0) {
       messageTimer -= dt;
-      if (messageTimer <= 0) els.message.style.opacity = '0';
+      if (messageTimer <= 0) el.message.style.opacity = '0';
     }
-    if (state.missionFlash) {
-      els.flash.style.display = 'block';
-      setText('ft', els.flashTitle, state.missionFlash.title);
-      setText('fr', els.flashReward, `+$${state.missionFlash.reward}`);
-      state.missionFlash.timer -= dt;
-      if (state.missionFlash.timer <= 0) {
-        state.missionFlash = null;
-        els.flash.style.display = 'none';
-      }
-    } else {
-      els.flash.style.display = 'none';
+    if (!state.missionFlash) {
+      el.flash.style.display = 'none';
+      return;
     }
+    el.flash.style.display = 'block';
+    setText('ft', el.flashTitle, state.missionFlash.title);
+    setText('fr', el.flashReward, `+$${state.missionFlash.reward}`);
+    state.missionFlash.timer -= dt;
+    if (state.missionFlash.timer <= 0) {
+      state.missionFlash = null;
+      el.flash.style.display = 'none';
+    }
+  }
+
+  // Minimap (10 Hz), the visible screen, and the overlay contents.
+  function updateScreens(dt, screen) {
+    const rico = state.player;
     // Minimap at 10 Hz — full-rate 2D painting is wasted work. Always draw
     // once, so screenshot staging (dt = 0) still paints it.
     mapTimer += dt;
-    if (mapTimer > 0.1 || !cache.mapDrawn) { mapTimer = 0; cache.mapDrawn = true; drawMinimap(); }
+    if (mapTimer > 0.1 || !cache.mapDrawn) {
+      mapTimer = 0;
+      cache.mapDrawn = true;
+      drawMinimap();
+    }
     // Screens: garage / missions overlays sit above play.
     const shown = state.garageOpen ? 'garage' : (state.missionsOpen ? 'missions' : screen);
     if (shown !== cache.shown) {
@@ -288,17 +331,17 @@ export function createHud(state, callbacks) {
       // run late (a busy frame), so the window must cover the whole tap.
       cache.shownAt = performance.now();
     }
-    for (const [name, el] of Object.entries(els.screens)) {
-      if (el) el.style.display = name === shown ? 'flex' : 'none';
+    for (const [name, node] of Object.entries(el.screens)) {
+      if (node) node.style.display = name === shown ? 'flex' : 'none';
     }
     if (state.garageOpen) {
-      const g = p.garage;
-      setHtml('glist', els.garageList,
-        `<div>Cash: $${p.cash.toLocaleString('en-US')}</div>` +
+      const g = rico.garage;
+      setHtml('glist', el.garageList,
+        `<div>Cash: $${rico.cash.toLocaleString('en-US')}</div>` +
         `<div>Engine tune: level ${g.tune} / 3 — top speed +${g.tune * 12}%</div>` +
         `<div>Armour: level ${g.armor} / 2 — ram damage −${g.armor * 25}%</div>` +
-        `<div>Car: ${p.car ? `${p.car.name || 'car'} — condition ${Math.round(p.car.condition ?? 100)}%` : 'no car with you'}</div>` +
-        `<div>Weapon: ${p.weapons[p.weaponIndex].name} — ${p.weapons[p.weaponIndex].mag} in mag, ${p.weapons[p.weaponIndex].ammo} reserve</div>`);
+        `<div>Car: ${rico.car ? `${rico.car.name || 'car'} — condition ${Math.round(rico.car.condition ?? 100)}%` : 'no car with you'}</div>` +
+        `<div>Weapon: ${rico.weapons[rico.weaponIndex].name} — ${rico.weapons[rico.weaponIndex].mag} in mag, ${rico.weapons[rico.weaponIndex].ammo} reserve</div>`);
     }
     if (state.missionsOpen) {
       const list = MISSIONS.map((m, i) => {
@@ -306,21 +349,40 @@ export function createHud(state, callbacks) {
         const mark = i < state.missionIndex ? '✓' : (i === state.missionIndex ? '▶' : '·');
         return `<div class="${cls}">${mark} ${i + 1}. ${m.title} — ${m.giver} · $${m.reward} · ${m.rp} RP</div>`;
       }).join('');
-      setHtml('mlist', els.missionsList, list);
+      setHtml('mlist', el.missionsList, list);
     }
     if (screen === 'title') {
-      setText('tcash', els.titleCash, `$${p.cash.toLocaleString('en-US')}`);
+      setText('tcash', el.titleCash, `$${rico.cash.toLocaleString('en-US')}`);
       const m = currentMission(state);
-      setText('tmiss', els.titleMission, m ? `Next job: ${m.title}` : 'Story complete — free roam');
+      setText('tmiss', el.titleMission, m ? `Next job: ${m.title}` : 'Story complete — free roam');
     }
     if (screen === 'complete') {
-      setText('fcash', els.finalCash, `$${p.cash.toLocaleString('en-US')}`);
-      setText('fmiss', els.finalMissions, `${state.missionIndex} / ${MISSIONS.length} jobs done`);
+      setText('fcash', el.finalCash, `$${rico.cash.toLocaleString('en-US')}`);
+      setText('fmiss', el.finalMissions, `${state.missionIndex} / ${MISSIONS.length} jobs done`);
     }
   }
 
+  function update(dt, screen) {
+    const rico = state.player;
+    // The in-game HUD only exists during play; menus get a clean frame.
+    el.hud.style.display = screen === 'play' ? 'block' : 'none';
+    // The keyboard hint is a play aid, not a screenshot prop.
+    if (el.controls) el.controls.style.display = window.__isShot ? 'none' : '';
+    updateVitals(rico);
+    updateWeapons(rico);
+    updateMissionHeader();
+    updateDispatch(rico);
+    updateCrewAndDistrict(rico);
+    updateCarAndRadio(rico, screen);
+    updateDialogueAndFlash(dt);
+    updateScreens(dt, screen);
+  }
+
   // Wire the menu buttons.
-  const bind = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  const bind = (id, fn) => {
+    const node = $(id);
+    if (node) node.addEventListener('click', fn);
+  };
   bind('btn-new', () => callbacks.onNewGame());
   bind('btn-continue', () => callbacks.onContinue());
   bind('btn-resume', () => callbacks.onResume());
@@ -333,10 +395,12 @@ export function createHud(state, callbacks) {
   // on touch the JOBS/GAS buttons sit under the overlay, so the backdrop
   // is the way out besides the Close button.
   const backdrop = (id, fn) => {
-    const el = $(id);
-    if (el) el.addEventListener('click', (event) => {
-      if (event.target === el && performance.now() - (cache.shownAt || 0) > 1500) fn();
-    });
+    const node = $(id);
+    if (node) {
+      node.addEventListener('click', (event) => {
+        if (event.target === node && performance.now() - (cache.shownAt || 0) > 1500) fn();
+      });
+    }
   };
   backdrop('screen-garage', () => callbacks.onGarageClose());
   backdrop('screen-missions', () => callbacks.onMissionsClose());
@@ -344,5 +408,5 @@ export function createHud(state, callbacks) {
     btn.addEventListener('click', () => callbacks.onGarageBuy(btn.getAttribute('data-garage')));
   }
 
-  return { update, showMessage, showGarageMessage };
+  return {update, showMessage, showGarageMessage};
 }

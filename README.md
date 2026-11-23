@@ -1,65 +1,84 @@
-# Solmar Bay — an open-world crime game
+# Solmar Bay — Open World
 
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/kuningcantik-crypto/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/kuningcantik-crypto/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-An original 3D open-world crime game in the spirit of GTA 6, built for the
-make.fun `gta6-01` bounty. A sun-soaked city to explore on foot and by car,
-with traffic, pedestrians, cars to steal, a wanted level with police, a
-police helicopter and roadblocks, twelve story missions, combat, radio,
-respect ranks, a garage, a crew, a HUD with a live minimap, a start screen
-and a save. Nothing here names, copies or borrows from any commercial game —
-the city (Solmar Bay), the people (Rico Vane, Lucia) and the story are all
-original.
+A 3D open-world crime game for make.fun's **gta6-01** bounty ($1,666): twelve story missions, a live police dispatch with helicopter and roadblocks, carjacking and garage upgrades, respect ranks, radio stations, crew abilities, and full mobile controls — all in one static HTML/JS game built on three.js.
 
-## Play it
+<sub>Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
 
-```sh
-node serve.ts   # serves game/ at http://localhost:8080
+## Play
+
+```bash
+node serve.ts            # http://localhost:8080
 ```
 
-Open the page in desktop Chrome, or on a phone: touch controls appear
-automatically — a virtual joystick on the left, GAS / brake and action
-buttons on the right, all multi-touch.
+Or open `game/index.html` through any static server. Progress saves in the browser (localStorage, key `solmar-bay.save.v1`).
 
-- **WASD** move / drive · **E** enter or exit a car · **Mouse click** shoot ·
-  **F** punch · **R** reload · **Space** jump · **Shift** run · **Esc** pause
-- **1–7** weapons · **Q** cycle weapon · **C** radio · **Z / X / V** crew
-  abilities · **G** garage (at the safehouse) · **M** job list
+Add `?seed=N` to the URL to rebuild the same city and traffic every time — the screenshots and the headless tests both use seed 7.
 
-## What's in it
+## The game
 
-- `game/` — the game itself: plain static files, no build step, no network
-  requests. `game/index.html` plus ES modules under `game/src/`, with
-  three.js r160 vendored under `game/vendor/`.
-- `main.ts` — the entry program: copies `game/` and `screenshots/` to the
-  output directory and writes `dossier.json` with the vendored make.fun
-  library (`vendor/makefun-game.ts`).
-- `screenshots/` — four real renders of the game (seed 7, 1280×800):
-  title, driving, police chase, mission complete.
-- `tools/` — the headless test harness (mission, desktop play and mobile
-  touch tests, run against Chrome over CDP).
+You are **Rico Vane**, fresh out of the north with $120 and a name to make. Lucia has work for you: twelve jobs stand between you and the big score, from a welcome package run at the pier to a $1,200 gold heist at the bank.
 
-## Systems
+- **Open world** — a golden-hour coastal city: plaza, bank, hotel, hospital, pier and beach, with traffic, pedestrians, a working ocean and a drifting-cloud sky.
+- **Twelve story missions** — fetch, pickup, taxi, race, ram, holdout and shootout jobs, each with its own giver, dialogue and reward, plus a $1,000 story bonus at the end.
+- **Live police** — a wanted system (1–5 stars) with a real SBPD dispatch panel: named units, distances and tactics, a helicopter with a spotlight cone at 3 stars, roadblocks at 4, and busted/wasted consequences.
+- **Driving** — carjacking, seven parked cars to steal, police cruisers to disable, garage upgrades at the safehouse (engine tune, armour, repairs, ammo) that persist with Rico.
+- **Combat** — seven weapons (fists to RPG) unlocked by respect rank, a respect ladder from Driver to Legend, and three crew abilities: clean plates, roadside repair, and police-vision.
+- **Radio** — four stations with named tracks, switched with C.
+- **Mobile** — a virtual joystick plus GAS / BRKE / ACT / WPN / CAM / JOBS multi-touch buttons; the HUD reflows for phones.
+- **Performance** — instanced city geometry, a shadow frustum that follows the player, capped pixel ratio, and an automatic low-effects mode when frames stay slow.
 
-- **12 missions** — Welcome to Solmar, Package Run, Getaway Driver, Taxi
-  Hustle, The Big Score, Neon Nights Street Race, Ram the Courier, Lose the
-  Heat, Pier Shootout, Midnight Delivery, Lucia's Run, and the bank-heist
-  finale The Gold Rush. Cash + respect (RP) rewards, with a $1,000 bonus
-  for finishing the story.
-- **Police** — wanted stars 0–5, police cruisers that chase and ram, a
-  helicopter with a spotlight at 3+ stars, roadblocks at 4+ stars, busted
-  and wasted screens.
-- **Weapons** — 7 slots (fists, pistol, SMG, shotgun, AR, RPG, sniper),
-  unlocked by respect rank.
-- **Radio** — 4 stations with rotating tracks; **respect** — 6 ranks from
-  DRIVER to LEGEND OF SOLMAR; **garage** — repair, engine tune and armour;
-  **crew** — three abilities with cooldowns.
-- **Performance** — instanced city geometry (~186 draw calls in play),
-  a player-following shadow frustum, capped pixel ratio, and an automatic
-  low-effects mode when frames stay slow.
+## Controls
+
+| Input | Action |
+| --- | --- |
+| WASD / arrows | Move / drive |
+| E | Enter / exit car |
+| Mouse click | Shoot |
+| F | Punch |
+| R | Reload |
+| 1–7, Q | Switch / cycle weapon |
+| C | Change radio station |
+| Z / X / V | Crew: clean plates / roadside repair / police-vision |
+| G | Garage (at the safehouse) |
+| M | Mission list |
+| Space | Jump |
+| Shift | Run |
+| Esc | Pause |
+
+On mobile the joystick moves Rico and the touch buttons drive, act, switch weapons, rotate the camera and open the job list.
+
+## Missions
+
+1. Welcome to Solmar (Lucia) — 2. Package Run (Lucia) — 3. The Getaway (Mira) — 4. Taxi Driver (Lio) — 5. The Big Score (Lucia) — 6. Street Race (Mira) — 7. Ram Raid (Nacho) — 8. Lose the Heat (Kiki) — 9. The Shootout (Lucia) — 10. Special Delivery (Tía Rosa) — 11. The Escort (Lucia) — 12. The Gold Rush (Lucia).
+
+## Build
+
+```bash
+node main.ts              # writes out/dossier.json + copies game/ and screenshots/
+```
+
+`main.ts` needs the four screenshots in `screenshots/` (seed 7, 1280×800). Regenerate them with:
+
+```bash
+node tools/shots.mjs      # renders 1-start, 2-play, 3-chase, 4-end via headless Chrome
+```
+
+Headless checks:
+
+```bash
+node tools/mission-test.mjs   # all 12 missions
+node tools/playtest.mjs       # desktop play
+node tools/mobile-test.mjs    # 390×844 viewport, real touch events
+```
+
+## Tech
+
+three.js (vendored) + vanilla JavaScript modules, no build step. The game is a static site: `game/index.html` + `game/src/*.js`.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [LICENSE](LICENSE).

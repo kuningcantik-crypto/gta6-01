@@ -1,26 +1,33 @@
-// Pedestrians: ordinary people of Solmar Bay who walk the sidewalks,
-// cross at intersections, flee from gunfire and fast cars, and fall when hit.
+// The people of Solmar Bay: they walk the sidewalks, cross at the corners,
+// run from gunfire and fast cars, and fall over when hit. Same box-and-sphere
+// construction as Rico, in a few different shirts.
 import * as THREE from 'three';
 import { CITY, PEDS } from './config.js';
 
-const SKIN = [0xe8b48a, 0xc98a5a, 0x8a5a3a, 0xf2d0b0];
-const SHIRT = [0xd93a2b, 0x2b6fd9, 0xf2c230, 0x2bd97a, 0xeeeeee, 0x8a5fd9, 0xff7a2b];
+const SKINS = [0xe8b48a, 0xc98a5a, 0x8a5a3a, 0xf2d0b0];
+const SHIRTS = [0xd93a2b, 0x2b6fd9, 0xf2c230, 0x2bd97a, 0xeeeeee, 0x8a5fd9, 0xff7a2b];
 
 export function makePedMesh(rng) {
   const group = new THREE.Group();
-  const skin = new THREE.MeshLambertMaterial({ color: SKIN[Math.floor(rng.next() * SKIN.length)] });
-  const shirt = new THREE.MeshLambertMaterial({ color: SHIRT[Math.floor(rng.next() * SHIRT.length)] });
-  const legs = new THREE.MeshLambertMaterial({ color: 0x2b3242 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), shirt);
-  body.position.y = 1.05; body.castShadow = true;
-  group.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), skin);
-  head.position.y = 1.62; head.castShadow = true;
+  const skinMat = new THREE.MeshLambertMaterial({color: SKINS[Math.floor(rng.next() * SKINS.length)]});
+  const shirtMat = new THREE.MeshLambertMaterial({color: SHIRTS[Math.floor(rng.next() * SHIRTS.length)]});
+  const legsMat = new THREE.MeshLambertMaterial({color: 0x2b3242});
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), shirtMat);
+  torso.position.y = 1.05;
+  torso.castShadow = true;
+  group.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), skinMat);
+  head.position.y = 1.62;
+  head.castShadow = true;
   group.add(head);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.2), legs);
-  legL.position.set(-0.14, 0.33, 0); group.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.14; group.add(legR);
-  group.userData.legL = legL; group.userData.legR = legR;
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.2), legsMat);
+  legL.position.set(-0.14, 0.33, 0);
+  group.add(legL);
+  const legR = legL.clone();
+  legR.position.x = 0.14;
+  group.add(legR);
+  group.userData.legL = legL;
+  group.userData.legR = legR;
   return group;
 }
 
@@ -33,7 +40,7 @@ export function makePed(rng) {
     z: horizontal ? road + 8 : along,
     angle: rng.next() * Math.PI * 2,
     speed: PEDS.walkSpeed * rng.range(0.8, 1.3),
-    state: 'walk', // 'walk' | 'flee' | 'down'
+    state: 'walk',
     downTimer: 0,
     target: null,
     mesh: null,
@@ -41,32 +48,35 @@ export function makePed(rng) {
   };
 }
 
-// Walk along a sidewalk; pick a new direction at intersections.
-export function stepPed(ped, dt, rng, danger) {
-  if (ped.state === 'down') {
-    ped.downTimer -= dt;
-    if (ped.downTimer <= 0) { ped.state = 'walk'; ped.speed = PEDS.walkSpeed; }
+// Walk the sidewalk; at a crossing, sometimes turn onto the other one.
+export function stepPed(walker, dt, rng, danger) {
+  if (walker.state === 'down') {
+    walker.downTimer -= dt;
+    if (walker.downTimer <= 0) {
+      walker.state = 'walk';
+      walker.speed = PEDS.walkSpeed;
+    }
     return;
   }
-  if (danger && ped.state !== 'flee') {
-    ped.state = 'flee';
-    ped.speed = PEDS.fleeSpeed;
-    ped.angle = Math.atan2(ped.x - danger.x, ped.z - danger.z);
+  if (danger && walker.state !== 'flee') {
+    walker.state = 'flee';
+    walker.speed = PEDS.fleeSpeed;
+    walker.angle = Math.atan2(walker.x - danger.x, walker.z - danger.z);
   }
-  if (ped.state === 'flee' && !danger) ped.state = 'walk';
-  const speed = ped.state === 'flee' ? PEDS.fleeSpeed : ped.speed;
-  ped.x += Math.sin(ped.angle) * speed * dt;
-  ped.z += Math.cos(ped.angle) * speed * dt;
-  ped.walkPhase += dt * speed * 3;
-  // Stay inside the city; turn around at the edge.
-  if (Math.abs(ped.x) > CITY.half || Math.abs(ped.z) > CITY.half) ped.angle += Math.PI;
-  // At an intersection, sometimes turn onto the crossing sidewalk.
-  const near = CITY.roads.find((r) => Math.abs((Math.abs(Math.sin(ped.angle)) > 0.5 ? ped.x : ped.z) - r) < 0.8);
-  if (near !== undefined && rng.next() < dt * 0.2) ped.angle += rng.next() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
+  if (walker.state === 'flee' && !danger) walker.state = 'walk';
+  const speed = walker.state === 'flee' ? PEDS.fleeSpeed : walker.speed;
+  walker.x += Math.sin(walker.angle) * speed * dt;
+  walker.z += Math.cos(walker.angle) * speed * dt;
+  walker.walkPhase += dt * speed * 3;
+  if (Math.abs(walker.x) > CITY.half || Math.abs(walker.z) > CITY.half) walker.angle += Math.PI;
+  const near = CITY.roads.find((r) => Math.abs((Math.abs(Math.sin(walker.angle)) > 0.5 ? walker.x : walker.z) - r) < 0.8);
+  if (near !== undefined && rng.next() < dt * 0.2) {
+    walker.angle += rng.next() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
+  }
 }
 
-export function knockPedDown(ped) {
-  ped.state = 'down';
-  ped.downTimer = 6;
-  ped.speed = 0;
+export function knockPedDown(walker) {
+  walker.state = 'down';
+  walker.downTimer = 6;
+  walker.speed = 0;
 }

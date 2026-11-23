@@ -1,6 +1,7 @@
-// Keyboard, mouse and touch input. Keys are read as a plain object every
-// frame; mouse click is a one-frame "shoot" pulse the world consumes.
-// Touch controls drive the same object through setHeld()/press().
+// Keyboard, mouse and touch input, all through one small object. Keys are
+// read as plain held flags every frame; a mouse click is a one-frame "shootPulse"
+// pulse the world consumes. Touch controls drive the same object through
+// setHeld() and press(), so the world never knows which device drove it.
 export const ACTION_CONFIRM = 'confirm';
 export const ACTION_PAUSE = 'pause';
 export const ACTION_ENTER_CAR = 'enter';
@@ -34,14 +35,14 @@ const KEYMAP = {
 
 export function createInput(canvas) {
   const held = {};
-  const pressed = {};
-  let shoot = false;
+  const edge = {};
+  let shootPulse = false;
   let mouseDX = 0;
 
   function onKeyDown(event) {
     const action = KEYMAP[event.code];
     if (!action) return;
-    if (!held[action]) pressed[action] = true;
+    if (!held[action]) edge[action] = true;
     held[action] = true;
     if (action === 'jump' || action === 'pause') event.preventDefault();
   }
@@ -50,7 +51,7 @@ export function createInput(canvas) {
     if (action) held[action] = false;
   }
   function onMouseDown(event) {
-    if (event.button === 0) shoot = true;
+    if (event.button === 0) shootPulse = true;
   }
   function onMouseMove(event) {
     mouseDX += event.movementX || 0;
@@ -62,46 +63,81 @@ export function createInput(canvas) {
 
   return {
     held,
-    // Edge-triggered: a press is consumed by its FIRST reader. The world
-    // runs up to 15 fixed steps per rendered frame, so a press that stayed
-    // readable all frame would fire 15 times (E would enter AND exit the
-    // car, M would open AND close the job list, Q would cycle 15 weapons).
-    // Reading once is what makes one press mean one action.
+    // Edge-triggered, and consumed by the FIRST reader: the world runs up
+    // to 15 fixed steps per rendered frame, so a press that stayed readable
+    // all frame would fire 15 times — E would enter AND exit the car in
+    // one tap, M would open AND close the job list, Q would cycle through
+    // every weapon. Reading once is what makes one press mean one action.
     wasPressed(action) {
-      const v = !!pressed[action];
-      pressed[action] = false;
-      return v;
+      const hit = !!edge[action];
+      edge[action] = false;
+      return hit;
     },
-    takeShoot() { const s = shoot; shoot = false; return s; },
-    takeMouseDX() { const d = mouseDX; mouseDX = 0; return d; },
-    endFrame() { for (const k of Object.keys(pressed)) pressed[k] = false; },
-    // Touch controls use these: hold a direction, or fire a one-frame press.
-    setHeld(action, value) { held[action] = !!value; },
-    press(action) { pressed[action] = true; },
-    release(action) { held[action] = false; },
-    queueShoot() { shoot = true; },
-    addMouseDX(dx) { mouseDX += dx; },
+    takeShoot() {
+      const s = shootPulse;
+      shootPulse = false;
+      return s;
+    },
+    takeMouseDX() {
+      const d = mouseDX;
+      mouseDX = 0;
+      return d;
+    },
+    endFrame() {
+      for (const k of Object.keys(edge)) edge[k] = false;
+    },
+    setHeld(action, value) {
+      held[action] = !!value;
+    },
+    press(action) {
+      edge[action] = true;
+    },
+    release(action) {
+      held[action] = false;
+    },
+    queueShoot() {
+      shootPulse = true;
+    },
+    addMouseDX(dx) {
+      mouseDX += dx;
+    },
   };
 }
 
 // A synthetic input for screenshot autopilots and tests: same shape, scripted.
 export function createScriptedInput() {
   const held = {};
-  const pressed = {};
-  let shoot = false;
+  const edge = {};
+  let shootPulse = false;
   return {
     held,
     wasPressed(action) {
-      const v = !!pressed[action];
-      pressed[action] = false;
-      return v;
+      const hit = !!edge[action];
+      edge[action] = false;
+      return hit;
     },
-    takeShoot() { const s = shoot; shoot = false; return s; },
-    takeMouseDX() { return 0; },
-    endFrame() { for (const k of Object.keys(pressed)) pressed[k] = false; },
-    set(action, value) { held[action] = value; },
-    press(action) { pressed[action] = true; },
-    queueShoot() { shoot = true; },
-    clear() { for (const k of Object.keys(held)) held[k] = false; },
+    takeShoot() {
+      const s = shootPulse;
+      shootPulse = false;
+      return s;
+    },
+    takeMouseDX() {
+      return 0;
+    },
+    endFrame() {
+      for (const k of Object.keys(edge)) edge[k] = false;
+    },
+    set(action, value) {
+      held[action] = value;
+    },
+    press(action) {
+      edge[action] = true;
+    },
+    queueShoot() {
+      shootPulse = true;
+    },
+    clear() {
+      for (const k of Object.keys(held)) held[k] = false;
+    },
   };
 }

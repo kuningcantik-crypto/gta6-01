@@ -1,6 +1,6 @@
-// Missions and the story: twelve jobs for Rico Vane, each a chain of steps.
-// The world asks this module what the player must do next and what the
-// beacon should point at; it never touches the renderer.
+// The mission machine: which mission Rico is on, which step of it, where the
+// beacon should point, and what the HUD should say. It only reads state and
+// moves the mission counters — it never touches the renderer or the input.
 import { MISSIONS } from './config.js';
 
 export function currentMission(state) {
@@ -13,37 +13,39 @@ export function currentStep(state) {
   return mission.steps[state.missionStep] || null;
 }
 
-// The beacon target for the current step, or null when the step has no place.
+// Where the beacon should point for the step in progress, or null when the
+// step has no place on the map.
 export function stepTarget(state) {
   const step = currentStep(state);
   if (!step) return null;
   if (step.kind === 'collect') {
-    const spots = step.spots || [];
-    const spot = spots[state.missionCollected || 0];
-    return spot ? { x: spot.x, z: spot.z, label: step.label } : null;
+    const spot = (step.spots || [])[state.missionCollected || 0];
+    return spot ? {x: spot.x, z: spot.z, label: step.label} : null;
   }
   if (step.kind === 'race') {
-    const cp = (step.checkpoints || [])[state.raceIndex || 0];
-    return cp ? { x: cp.x, z: cp.z, label: step.label } : null;
+    const gate = (step.checkpoints || [])[state.raceIndex || 0];
+    return gate ? {x: gate.x, z: gate.z, label: step.label} : null;
   }
-  if (step.kind === 'ram' && state.targetCar) {
-    return { x: state.targetCar.x, z: state.targetCar.z, label: step.label };
+  if (step.kind === 'ram') {
+    if (state.targetCar) return {x: state.targetCar.x, z: state.targetCar.z, label: step.label};
+    return step.pos ? {x: step.pos.x, z: step.pos.z, label: step.label} : null;
   }
-  if (step.kind === 'ram') return step.pos ? { x: step.pos.x, z: step.pos.z, label: step.label } : null;
-  if (step.pos) return { x: step.pos.x, z: step.pos.z, label: step.label };
+  if (step.pos) return {x: step.pos.x, z: step.pos.z, label: step.label};
   return null;
 }
 
-// Label shown in the HUD for the current objective.
+// The objective line the HUD shows for the step in progress.
 export function objectiveLabel(state) {
   const mission = currentMission(state);
   const step = currentStep(state);
   if (!mission || !step) return 'Solmar Bay is yours. Free roam — cause chaos or enjoy the sunset.';
   if (step.kind === 'collect') {
-    return `${mission.title}: ${step.label.replace(/\(\d+\/\d+\)/, `(${state.missionCollected || 0}/${step.count})`)}`;
+    const shown = step.label.replace(/\(\d+\/\d+\)/, `(${state.missionCollected || 0}/${step.count})`);
+    return `${mission.title}: ${shown}`;
   }
   if (step.kind === 'race') {
-    return `${mission.title}: Race the Neon circuit (${state.raceIndex || 0}/${(step.checkpoints || []).length} gates)`;
+    const total = (step.checkpoints || []).length;
+    return `${mission.title}: Race the Neon circuit (${state.raceIndex || 0}/${total} gates)`;
   }
   if (step.kind === 'eliminate') {
     return `${mission.title}: Disable police cars (${state.eliminated || 0}/${step.count})`;
@@ -51,22 +53,23 @@ export function objectiveLabel(state) {
   return `${mission.title}: ${step.label}`;
 }
 
-// The step after the current one, for the HUD's NEXT line.
+// The step after this one, for the HUD's NEXT line.
 export function nextStepLabel(state) {
   const mission = currentMission(state);
   if (!mission) return 'Free roam';
-  const next = mission.steps[state.missionStep + 1];
-  if (next) return `NEXT: ${next.label}`;
-  const following = MISSIONS[state.missionIndex + 1];
-  return following ? `NEXT JOB: ${following.title} — ${following.giver}` : 'NEXT: Own the city';
+  const following = mission.steps[state.missionStep + 1];
+  if (following) return `NEXT: ${following.label}`;
+  const nextJob = MISSIONS[state.missionIndex + 1];
+  if (nextJob) return `NEXT JOB: ${nextJob.title} — ${nextJob.giver}`;
+  return 'NEXT: Own the city';
 }
 
-// Queue the giver's line for the HUD dialogue box.
+// Queue a giver's line for the HUD dialogue box.
 export function sayLine(state, text, name, role) {
-  state.dialogue = { name: name || 'Lucia', role: role || 'Fixer', text, timer: 7 };
+  state.dialogue = {name: name || 'Lucia', role: role || 'Fixer', text, timer: 7};
 }
 
-// Called when a step (re)starts: resets per-step counters and the clock.
+// Called when a step (re)starts: per-step counters and the clock reset.
 export function startStep(state) {
   const step = currentStep(state);
   state.missionCollected = 0;
@@ -85,7 +88,7 @@ export function startStep(state) {
   }
 }
 
-// Advance the mission state machine. Returns 'step' when a step completes,
+// Move the mission machine one step on. Returns 'step' when a step completes,
 // 'mission' when a whole mission completes, 'done' when the story ends.
 export function advanceMission(state) {
   const mission = currentMission(state);
@@ -95,24 +98,24 @@ export function advanceMission(state) {
   state.missionHold = 0;
   state.raceIndex = 0;
   state.eliminated = 0;
-  if (state.missionStep >= mission.steps.length) {
-    state.player.cash += mission.reward;
-    state.player.rp = (state.player.rp || 0) + (mission.rp || mission.reward);
-    state.missionIndex += 1;
-    state.missionStep = 0;
-    state.missionFlash = { title: `${mission.title} — complete`, reward: mission.reward, timer: 4 };
-    state.targetCar = null;
-    const next = MISSIONS[state.missionIndex];
-    if (next && next.dialogue) sayLine(state, next.dialogue[0], next.giver, 'Fixer');
-    if (state.missionIndex >= MISSIONS.length) {
-      state.player.cash += 1000;
-      state.allMissionsDone = true;
-      state.missionFlash = { title: 'You own Solmar Bay', reward: 1000, timer: 6 };
-      return 'done';
-    }
+  if (state.missionStep < mission.steps.length) {
     startStep(state);
-    return 'mission';
+    return 'step';
+  }
+  state.player.cash += mission.reward;
+  state.player.rp = (state.player.rp || 0) + (mission.rp || mission.reward);
+  state.missionIndex += 1;
+  state.missionStep = 0;
+  state.missionFlash = {title: `${mission.title} — complete`, reward: mission.reward, timer: 4};
+  state.targetCar = null;
+  const next = MISSIONS[state.missionIndex];
+  if (next && next.dialogue) sayLine(state, next.dialogue[0], next.giver, 'Fixer');
+  if (state.missionIndex >= MISSIONS.length) {
+    state.player.cash += 1000;
+    state.allMissionsDone = true;
+    state.missionFlash = {title: 'You own Solmar Bay', reward: 1000, timer: 6};
+    return 'done';
   }
   startStep(state);
-  return 'step';
+  return 'mission';
 }
