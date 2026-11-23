@@ -1,74 +1,97 @@
-// The mission machine: which mission Rico is on, which step of it, where
-// the beacon should point, and what the HUD should say. It only reads
-// state and moves the mission counters — it never touches the renderer or
-// the input.
+// The job board in code: which contract Rico is running, which leg of
+// it, where the beacon should point, and what the HUD ought to print.
+// This module only ever reads state and nudges the job counters — it
+// never paints anything and never reads the keyboard.
 import { MISSIONS } from './config.js';
 
+// The contract Rico is currently running, or nothing once the story ends.
 export function currentMission(state) {
-  return MISSIONS[state.missionIndex] || null;
+  const job = MISSIONS[state.missionIndex];
+  return job === undefined ? null : job;
 }
 
+// The leg of that contract Rico is on right now.
 export function currentStep(state) {
-  const mission = currentMission(state);
-  if (!mission) return null;
-  return mission.steps[state.missionStep] || null;
+  const job = currentMission(state);
+  if (job === null) return null;
+  const leg = job.steps[state.missionStep];
+  return leg === undefined ? null : leg;
 }
 
-// Where the beacon should point for the step in progress, or null when
-// the step has no place on the map. Collect steps point at the next
-// uncollected spot, race steps at the next gate, ram steps follow the
+function spotOf(leg, index) {
+  const spots = leg.spots || [];
+  const spot = spots[index || 0];
+  return spot === undefined ? null : spot;
+}
+
+function gateOf(leg, index) {
+  const gates = leg.checkpoints || [];
+  const gate = gates[index || 0];
+  return gate === undefined ? null : gate;
+}
+
+// Where the beacon should point for the leg in progress, or nothing
+// when the leg has no place on the map. Collect legs point at the next
+// uncollected spot, race legs at the next gate, ram legs follow the
 // courier car, and every other kind points at its own position.
 export function stepTarget(state) {
-  const step = currentStep(state);
-  if (!step) return null;
-  if (step.kind === 'collect') {
-    const spot = (step.spots || [])[state.missionCollected || 0];
-    return spot ? {x: spot.x, z: spot.z, label: step.label} : null;
+  const leg = currentStep(state);
+  if (leg === null) return null;
+  switch (leg.kind) {
+    case 'collect': {
+      const spot = spotOf(leg, state.missionCollected);
+      return spot === null ? null : {x: spot.x, z: spot.z, label: leg.label};
+    }
+    case 'race': {
+      const gate = gateOf(leg, state.raceIndex);
+      return gate === null ? null : {x: gate.x, z: gate.z, label: leg.label};
+    }
+    case 'ram': {
+      if (!state.targetCar) return null;
+      return {x: state.targetCar.x, z: state.targetCar.z, label: leg.label};
+    }
+    default: {
+      if (!leg.pos) return null;
+      return {x: leg.pos.x, z: leg.pos.z, label: leg.label};
+    }
   }
-  if (step.kind === 'race') {
-    const gate = (step.checkpoints || [])[state.raceIndex || 0];
-    return gate ? {x: gate.x, z: gate.z, label: step.label} : null;
-  }
-  if (step.kind === 'ram' && state.targetCar) {
-    return {x: state.targetCar.x, z: state.targetCar.z, label: step.label};
-  }
-  if (step.pos) return {x: step.pos.x, z: step.pos.z, label: step.label};
-  return null;
 }
 
-// The objective line the HUD shows for the step in progress. Counted
-// steps (collect, race, eliminate) show live progress; the rest show the
-// step's own label.
-function formatObjective(state, mission, step) {
-  if (step.kind === 'collect') {
-    const shown = step.label.replace(/\(\d+\/\d+\)/, `(${state.missionCollected || 0}/${step.count})`);
-    return `${mission.title}: ${shown}`;
+function progressText(state, leg) {
+  if (leg.kind === 'collect') {
+    const shown = leg.label.replace(/\(\d+\/\d+\)/, '(' + (state.missionCollected || 0) + '/' + leg.count + ')');
+    return shown;
   }
-  if (step.kind === 'race') {
-    const total = (step.checkpoints || []).length;
-    return `${mission.title}: Race the Neon circuit (${state.raceIndex || 0}/${total} gates)`;
+  if (leg.kind === 'race') {
+    const total = (leg.checkpoints || []).length;
+    return 'Race the Neon circuit (' + (state.raceIndex || 0) + '/' + total + ' gates)';
   }
-  if (step.kind === 'eliminate') {
-    return `${mission.title}: Disable police cars (${state.eliminated || 0}/${step.count})`;
+  if (leg.kind === 'eliminate') {
+    return 'Disable police cars (' + (state.eliminated || 0) + '/' + leg.count + ')';
   }
-  return `${mission.title}: ${step.label}`;
+  return leg.label;
 }
 
+// The objective line the HUD shows for the leg in progress. Counted
+// legs (collect, race, eliminate) show live progress; the rest show the
+// leg's own label.
 export function objectiveLabel(state) {
-  const mission = currentMission(state);
-  const step = currentStep(state);
-  if (!mission || !step) return 'Solmar Bay is yours. Free roam — cause chaos or enjoy the sunset.';
-  return formatObjective(state, mission, step);
+  const job = currentMission(state);
+  const leg = currentStep(state);
+  if (job === null || leg === null) {
+    return 'Solmar Bay is yours. Free roam — cause chaos or enjoy the sunset.';
+  }
+  return job.title + ': ' + progressText(state, leg);
 }
 
-// The step after this one, for the HUD's NEXT line.
+// The leg after this one, for the HUD's NEXT line.
 export function nextStepLabel(state) {
-  const mission = currentMission(state);
-  if (!mission) return 'Free roam';
-  const following = mission.steps[state.missionStep + 1];
-  if (following) return `NEXT: ${following.label}`;
+  const job = currentMission(state);
+  if (job === null) return 'Free roam';
+  const following = job.steps[state.missionStep + 1];
+  if (following !== undefined) return 'NEXT: ' + following.label;
   const nextJob = MISSIONS[state.missionIndex + 1];
-  if (nextJob) return `NEXT JOB: ${nextJob.title} — ${nextJob.giver}`;
+  if (nextJob !== undefined) return 'NEXT JOB: ' + nextJob.title + ' — ' + nextJob.giver;
   return 'NEXT: Own the city';
 }
 
@@ -77,53 +100,59 @@ export function sayLine(state, text, name, role) {
   state.dialogue = {name: name || 'Lucia', role: role || 'Fixer', text, timer: 7};
 }
 
-// Called when a step (re)starts: per-step counters and the clock reset.
-export function startStep(state) {
-  const step = currentStep(state);
+function clearLegCounters(state) {
   state.missionCollected = 0;
   state.missionHold = 0;
   state.raceIndex = 0;
   state.eliminated = 0;
-  state.missionTimer = step && step.seconds ? step.seconds : 0;
-  if (step && step.kind === 'ram') state.targetCar = null;
-  if (step && step.wantedOnStart) {
-    state.player.wanted = Math.max(state.player.wanted, step.wantedOnStart);
+}
+
+// Called when a leg (re)starts: per-leg counters and the clock reset.
+export function startStep(state) {
+  const leg = currentStep(state);
+  clearLegCounters(state);
+  state.missionTimer = leg !== null && leg.seconds ? leg.seconds : 0;
+  if (leg !== null && leg.kind === 'ram') state.targetCar = null;
+  if (leg !== null && leg.wantedOnStart) {
+    state.player.wanted = Math.max(state.player.wanted, leg.wantedOnStart);
     state.player.crimeTimer = 0;
   }
-  const mission = currentMission(state);
-  if (mission && mission.dialogue && state.missionStep === 0) {
-    sayLine(state, mission.dialogue[0], mission.giver, 'Fixer');
+  const job = currentMission(state);
+  if (job !== null && job.dialogue && state.missionStep === 0) {
+    sayLine(state, job.dialogue[0], job.giver, 'Fixer');
   }
 }
 
-// Move the mission machine one step on. Returns 'step' when a step
-// completes, 'mission' when a whole mission completes, 'done' when the
+function payOut(state, job) {
+  const rpGain = job.rp || job.reward;
+  state.player.cash += job.reward;
+  state.player.rp = (state.player.rp || 0) + rpGain;
+  if (state.stats) {
+    state.stats.missionsDone += 1;
+    state.stats.cashEarned += job.reward;
+    state.stats.rpEarned += rpGain;
+  }
+}
+
+// Move the job machine one leg on. Returns 'step' when a leg
+// completes, 'mission' when a whole job completes, 'done' when the
 // story ends.
 export function advanceMission(state) {
-  const mission = currentMission(state);
-  if (!mission) return null;
+  const job = currentMission(state);
+  if (job === null) return null;
   state.missionStep += 1;
-  state.missionCollected = 0;
-  state.missionHold = 0;
-  state.raceIndex = 0;
-  state.eliminated = 0;
-  if (state.missionStep < mission.steps.length) {
+  clearLegCounters(state);
+  if (state.missionStep < job.steps.length) {
     startStep(state);
     return 'step';
   }
-  state.player.cash += mission.reward;
-  state.player.rp = (state.player.rp || 0) + (mission.rp || mission.reward);
-  if (state.stats) {
-    state.stats.missionsDone += 1;
-    state.stats.cashEarned += mission.reward;
-    state.stats.rpEarned += mission.rp || mission.reward;
-  }
+  payOut(state, job);
   state.missionIndex += 1;
   state.missionStep = 0;
-  state.missionFlash = {title: `${mission.title} — complete`, reward: mission.reward, timer: 4};
+  state.missionFlash = {title: job.title + ' — complete', reward: job.reward, timer: 4};
   state.targetCar = null;
   const next = MISSIONS[state.missionIndex];
-  if (next && next.dialogue) sayLine(state, next.dialogue[0], next.giver, 'Fixer');
+  if (next !== undefined && next.dialogue) sayLine(state, next.dialogue[0], next.giver, 'Fixer');
   if (state.missionIndex >= MISSIONS.length) {
     state.player.cash += 1000;
     state.allMissionsDone = true;

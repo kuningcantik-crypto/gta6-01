@@ -1,8 +1,8 @@
 // Solmar Bay tuning, all in one place. Every number that shapes the
-// city, the cars, the fights and the story lives here; the rest of the
-// game only reads values from this module and never hard-codes a tuning
-// number. The city, the people and the story are all original — nothing
-// here names, copies or borrows from any commercial game.
+// city, the cars, the fights and the story lives in this file; the rest
+// of the game only ever reads values from here and never hard-codes a
+// tuning number of its own. The city, the people and the story are all
+// original — nothing here names, copies or borrows from any commercial game.
 export const STEP = 1 / 60;
 export const SAVE_KEY = 'solmar-bay.save.v1';
 export const BEST_KEY = 'solmar-bay.best.v1';
@@ -87,19 +87,23 @@ export const RESPECT_RANKS = [
 export function rankFor(rp) {
   let current = RESPECT_RANKS[0];
   let nextOne = null;
-  for (const entry of RESPECT_RANKS) {
+  let i = 0;
+  while (i < RESPECT_RANKS.length) {
+    const entry = RESPECT_RANKS[i];
     if (rp < entry.rp) {
       nextOne = entry;
       break;
     }
     current = entry;
+    i += 1;
   }
   return {rank: current, next: nextOne};
 }
 
-// Radio: four original stations. The track line turns over every 45 s.
-// Stations carry a DJ and a few spoken lines: switching station drops a
-// line from the DJ into the dialogue box, like a real radio handover.
+// Radio: five original stations. The track line turns over every 45 s.
+// Each station carries a DJ and a couple of spoken lines: switching
+// station drops a line from the DJ into the dialogue box, like a real
+// radio handover.
 export const RADIO = [
   {
     name: 'OMBO 98.4', genre: 'Island Pop',
@@ -137,6 +141,15 @@ export const RADIO = [
       'Nacho here. That last track was for everyone with a warrant.',
     ],
   },
+  {
+    name: 'TIDE FM 97.3', genre: 'Surf Rock & Indie',
+    tracks: ['Boardwalk Static — The Breakers', 'Saltwater Static — Kip Sorrento', 'Pier Lights — Mira Kesang'],
+    dj: 'DJ Waverly',
+    lines: [
+      'Tide FM — Waverly here, riding the static off the bay.',
+      'Waverly on the mic. If the surf is up, the volume goes up too.',
+    ],
+  },
 ];
 
 // Districts, named by where the player stands. Heat is per-district
@@ -151,15 +164,15 @@ export const DISTRICTS = [
   {name: 'CENTRAL PLAZA', road: 'Plaza Mayor', x0: -52, z0: -52, x1: 52, z1: 52},
 ];
 export function districtAt(x, z) {
-  for (const zone of DISTRICTS) {
-    if (x >= zone.x0 && x <= zone.x1 && z >= zone.z0 && z <= zone.z1) return zone;
-  }
-  return DISTRICTS[DISTRICTS.length - 1];
+  const zone = DISTRICTS.find((d) => x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1);
+  return zone || DISTRICTS[DISTRICTS.length - 1];
 }
 
 // The heat word the HUD shows for a district's trouble level.
 export function heatLabel(heat) {
-  return heat < 30 ? 'NEUTRAL' : heat < 60 ? 'WARM' : 'HOT';
+  if (heat < 30) return 'NEUTRAL';
+  if (heat < 60) return 'WARM';
+  return 'HOT';
 }
 
 // Every stealable car gets a name from its paint and index.
@@ -193,12 +206,13 @@ export const CREW = [
   {id: 'eyes', name: 'EYES OUT', who: 'Kiki · Lookout', key: 'V', cooldown: 60, desc: 'Reveal the police search zone (10 s)'},
 ];
 
-// The story: twelve jobs for Rico Vane, each a chain of steps. A step is
-// a place to reach (goto), a thing to collect (collect), a wanted level
-// to earn (wanted), a passenger to pick up and drop off (pickup /
-// deliver), a timed hold (hold), a race through gates against the clock
-// (race), a car to smash until it stops (ram), police cars to disable
-// (eliminate), or a place to reach before the clock runs out (timed).
+// A job is a title, a giver, a chapter, a brief, a payout in cash and
+// respect, one opening line, and a chain of steps. A step is a place to
+// reach (goto), a thing to collect (collect), a wanted level to earn
+// (wanted), a passenger to pick up and drop off (pickup / deliver), a
+// timed hold (hold), a race through gates against the clock (race), a
+// car to smash until it stops (ram), police cars to disable (eliminate),
+// or a place to reach before the clock runs out (timed).
 function job(id, title, giver, chapter, brief, reward, rp, line, steps) {
   return {id, title, giver, chapter, brief, reward, rp, dialogue: [line], steps};
 }
@@ -207,7 +221,8 @@ function job(id, title, giver, chapter, brief, reward, rp, line, steps) {
 // or null for steps with no place on the map (anyCar, wanted, eliminate).
 function at(x, z) { return {x, z}; }
 function move(kind, label, place, extra = {}) {
-  const built = {kind, label, ...extra};
+  const built = {kind, label};
+  for (const key of Object.keys(extra)) built[key] = extra[key];
   if (place) built.pos = place;
   return built;
 }

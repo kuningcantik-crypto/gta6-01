@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { PLAYER } from './config.js';
 
-// One limb: a box pivoted at its top edge, so rotating it swings the
+// One limb: a box hung from its top edge, so rotating it swings the
 // whole limb from the joint instead of from its middle.
 function limb(width, height, depth, material, x, y) {
   const geo = new THREE.BoxGeometry(width, height, depth);
@@ -39,15 +39,17 @@ export function makePlayerMesh() {
   hair.position.y = 1.76;
   figure.add(hair);
 
-  const armL = limb(0.18, 0.7, 0.18, shirt, -0.42, 1.45);
-  const armR = limb(0.18, 0.7, 0.18, shirt, 0.42, 1.45);
-  const legL = limb(0.22, 0.7, 0.22, denim, -0.16, 0.7);
-  const legR = limb(0.22, 0.7, 0.22, denim, 0.16, 0.7);
-  figure.add(armL, armR, legL, legR);
-  figure.userData.armL = armL;
-  figure.userData.armR = armR;
-  figure.userData.legL = legL;
-  figure.userData.legR = legR;
+  const limbs = {
+    armL: limb(0.18, 0.7, 0.18, shirt, -0.42, 1.45),
+    armR: limb(0.18, 0.7, 0.18, shirt, 0.42, 1.45),
+    legL: limb(0.22, 0.7, 0.22, denim, -0.16, 0.7),
+    legR: limb(0.22, 0.7, 0.22, denim, 0.16, 0.7),
+  };
+  figure.add(limbs.armL, limbs.armR, limbs.legL, limbs.legR);
+  figure.userData.armL = limbs.armL;
+  figure.userData.armR = limbs.armR;
+  figure.userData.legL = limbs.legL;
+  figure.userData.legR = limbs.legR;
   return figure;
 }
 
@@ -68,13 +70,13 @@ function headingFromKeys(input, cameraYaw) {
 
 // Space launches Rico; gravity pulls him back and the ground catches him.
 function applyJump(rico, input, dt) {
-  if (input.wasPressed('jump') && rico.y <= 0.01) rico.vy = PLAYER.jumpSpeed;
+  const wantsJump = input.wasPressed('jump') && rico.y <= 0.01;
+  if (wantsJump) rico.vy = PLAYER.jumpSpeed;
   rico.vy -= PLAYER.gravity * dt;
   rico.y += rico.vy * dt;
-  if (rico.y <= 0) {
-    rico.y = 0;
-    rico.vy = 0;
-  }
+  if (rico.y > 0) return;
+  rico.y = 0;
+  rico.vy = 0;
 }
 
 // On foot: WASD against the camera, Shift to sprint, Space to jump.
@@ -86,12 +88,15 @@ export function stepPlayerOnFoot(rico, input, dt, cameraYaw, collide) {
   const heading = headingFromKeys(input, cameraYaw);
   const moving = heading !== null;
   if (moving) rico.angle = Math.atan2(heading.x, heading.z);
-  const tryX = rico.x + (moving ? heading.x * pace * dt : 0);
-  const tryZ = rico.z + (moving ? heading.z * pace * dt : 0);
+  const stepX = moving ? heading.x * pace * dt : 0;
+  const stepZ = moving ? heading.z * pace * dt : 0;
+  const tryX = rico.x + stepX;
+  const tryZ = rico.z + stepZ;
   if (!collide(tryX, rico.z, PLAYER.radius)) rico.x = tryX;
   if (!collide(rico.x, tryZ, PLAYER.radius)) rico.z = tryZ;
   rico.moving = moving;
   rico.running = sprinting && moving;
   applyJump(rico, input, dt);
-  rico.walkPhase = (rico.walkPhase || 0) + dt * pace * (moving ? 1.6 : 0);
+  const swing = moving ? 1.6 : 0;
+  rico.walkPhase = (rico.walkPhase || 0) + dt * pace * swing;
 }

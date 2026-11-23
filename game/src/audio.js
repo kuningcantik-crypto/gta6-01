@@ -1,12 +1,14 @@
 // Procedural sound: everything is synthesized with WebAudio, no audio
 // files at all. An engine hum, a police siren, gunshots, a punch, a
-// pickup chime, a mission sting, and a soft sunset pad under the title
-// screen. One chord per radio station — switching station retunes the pad.
+// pickup chime, a mission sting, rain on the roof, and a soft sunset pad
+// under the title screen. One chord per radio station — switching station
+// retunes the pad.
 const STATION_CHORDS = [
   [220, 277.18, 329.63],
   [196, 246.94, 293.66],
   [174.61, 220, 261.63],
   [146.83, 185, 220],
+  [164.81, 207.65, 246.94],
 ];
 
 export function createAudio() {
@@ -16,10 +18,13 @@ export function createAudio() {
   let wail = null;
   let wailLevel = null;
   let padVoices = null;
+  let rainSrc = null;
+  let rainLevel = null;
   let live = false;
+  let volume = 0.8;
 
   function openContext() {
-    if (ctx) return true;
+    if (ctx !== null) return true;
     try {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
     } catch {
@@ -27,6 +32,7 @@ export function createAudio() {
     }
     return true;
   }
+
   function unlock() {
     if (!openContext()) return;
     if (ctx.state === 'suspended') ctx.resume();
@@ -34,8 +40,9 @@ export function createAudio() {
     startMotor();
     startPad();
   }
+
   function startMotor() {
-    if (motor) return;
+    if (motor !== null) return;
     motor = ctx.createOscillator();
     motor.type = 'sawtooth';
     motor.frequency.value = 50;
@@ -49,39 +56,43 @@ export function createAudio() {
     motorLevel.connect(ctx.destination);
     motor.start();
   }
+
   function startPad() {
-    if (padVoices) return;
+    if (padVoices !== null) return;
     retunePad(STATION_CHORDS[0]);
   }
+
   function retunePad(freqs) {
     padVoices = [];
     const bus = ctx.createGain();
-    bus.gain.value = 0.035;
+    bus.gain.value = 0.035 * volume;
     bus.connect(ctx.destination);
-    for (const freq of freqs) {
+    for (let i = 0; i < freqs.length; i += 1) {
       const voice = ctx.createOscillator();
       voice.type = 'sine';
-      voice.frequency.value = freq;
+      voice.frequency.value = freqs[i];
       voice.connect(bus);
       voice.start();
       padVoices.push(voice);
     }
   }
-  function tone(freq, seconds, shape, volume) {
-    if (!ctx || !live) return;
+
+  function tone(freq, seconds, shape, loud) {
+    if (ctx === null || !live) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = shape || 'sine';
     osc.frequency.value = freq;
-    gain.gain.setValueAtTime(volume || 0.15, ctx.currentTime);
+    gain.gain.setValueAtTime((loud || 0.15) * volume, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + seconds);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + seconds);
   }
-  function burst(seconds, volume) {
-    if (!ctx || !live) return;
+
+  function burst(seconds, loud) {
+    if (ctx === null || !live) return;
     const len = Math.floor(ctx.sampleRate * seconds);
     const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -89,77 +100,93 @@ export function createAudio() {
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     const gain = ctx.createGain();
-    gain.gain.value = volume;
+    gain.gain.value = loud * volume;
     src.connect(gain);
     gain.connect(ctx.destination);
     src.start();
   }
-  // One-shot effects, as small scripts: each entry is a list of notes,
-  // and a note names its instrument (tone or burst), the delay before it
-  // fires, and the arguments. A single runner plays every script.
+
+  // One-shot effects, as small scripts: each entry is a note, and a note
+  // names its instrument (tone or burst), the delay before it fires, and
+  // the arguments. A single runner plays every script.
   const SCRIPTS = {
-    shot: [{play: 'burst', after: 0, with: [0.12, 0.3]}],
+    shot: [['burst', 0, [0.12, 0.3]]],
     punch: [
-      {play: 'burst', after: 0, with: [0.08, 0.2]},
-      {play: 'tone', after: 0, with: [120, 0.08, 'square', 0.1]},
+      ['burst', 0, [0.08, 0.2]],
+      ['tone', 0, [120, 0.08, 'square', 0.1]],
     ],
     pickup: [
-      {play: 'tone', after: 0, with: [880, 0.12, 'sine', 0.18]},
-      {play: 'tone', after: 90, with: [1320, 0.18, 'sine', 0.15]},
+      ['tone', 0, [880, 0.12, 'sine', 0.18]],
+      ['tone', 90, [1320, 0.18, 'sine', 0.15]],
     ],
     mission: [
-      {play: 'tone', after: 0, with: [523, 0.25, 'triangle', 0.16]},
-      {play: 'tone', after: 110, with: [659, 0.25, 'triangle', 0.16]},
-      {play: 'tone', after: 220, with: [784, 0.25, 'triangle', 0.16]},
+      ['tone', 0, [523, 0.25, 'triangle', 0.16]],
+      ['tone', 110, [659, 0.25, 'triangle', 0.16]],
+      ['tone', 220, [784, 0.25, 'triangle', 0.16]],
     ],
-    crash: [{play: 'burst', after: 0, with: [0.25, 0.25]}],
-    click: [{play: 'tone', after: 0, with: [600, 0.05, 'square', 0.08]}],
+    crash: [['burst', 0, [0.25, 0.25]]],
+    click: [['tone', 0, [600, 0.05, 'square', 0.08]]],
     horn: [
-      {play: 'tone', after: 0, with: [370, 0.18, 'sawtooth', 0.1]},
-      {play: 'tone', after: 0, with: [466, 0.18, 'sawtooth', 0.1]},
+      ['tone', 0, [370, 0.18, 'sawtooth', 0.1]],
+      ['tone', 0, [466, 0.18, 'sawtooth', 0.1]],
     ],
   };
+
   function playNote(note) {
-    if (note.play === 'burst') burst(...note.with);
-    else tone(...note.with);
+    const [kind, , args] = note;
+    if (kind === 'burst') burst(args[0], args[1]);
+    else tone(args[0], args[1], args[2], args[3]);
   }
+
   function playScript(script) {
-    for (const note of script) {
-      if (note.after > 0) setTimeout(() => playNote(note), note.after);
+    for (let i = 0; i < script.length; i += 1) {
+      const note = script[i];
+      if (note[1] > 0) setTimeout(() => playNote(note), note[1]);
       else playNote(note);
     }
   }
+
   const effects = {};
-  for (const [name, script] of Object.entries(SCRIPTS)) {
-    effects[name] = () => playScript(script);
+  const names = Object.keys(SCRIPTS);
+  for (let i = 0; i < names.length; i += 1) {
+    const name = names[i];
+    effects[name] = () => playScript(SCRIPTS[name]);
   }
+
+  function stopVoices(voices) {
+    for (let i = 0; i < voices.length; i += 1) {
+      try {
+        voices[i].stop();
+      } catch {
+        // already stopped
+      }
+    }
+  }
+
   return {
     unlock,
+    setVolume(level) {
+      volume = Math.max(0, Math.min(1, level));
+    },
     setRadio(station) {
-      if (!ctx || !live || !padVoices) return;
-      for (const voice of padVoices) {
-        try {
-          voice.stop();
-        } catch {
-          // already stopped
-        }
-      }
+      if (ctx === null || !live || padVoices === null) return;
+      stopVoices(padVoices);
       padVoices = null;
       retunePad(STATION_CHORDS[station % STATION_CHORDS.length]);
     },
     engine(speed01, driving) {
-      if (!ctx || !motorLevel) return;
+      if (ctx === null || motorLevel === null) return;
       const target = live && driving ? 0.05 + speed01 * 0.06 : 0;
-      motorLevel.gain.setTargetAtTime(target, ctx.currentTime, 0.1);
+      motorLevel.gain.setTargetAtTime(target * volume, ctx.currentTime, 0.1);
       motor.frequency.setTargetAtTime(50 + speed01 * 110, ctx.currentTime, 0.1);
     },
     siren(on) {
-      if (!ctx || !live) return;
-      if (on && !wail) {
+      if (ctx === null || !live) return;
+      if (on && wail === null) {
         wail = ctx.createOscillator();
         wail.type = 'triangle';
         wailLevel = ctx.createGain();
-        wailLevel.gain.value = 0.045;
+        wailLevel.gain.value = 0.045 * volume;
         const lfo = ctx.createOscillator();
         lfo.frequency.value = 0.6;
         const lfoGain = ctx.createGain();
@@ -171,7 +198,7 @@ export function createAudio() {
         wailLevel.connect(ctx.destination);
         wail.start();
         lfo.start();
-      } else if (!on && wail) {
+      } else if (!on && wail !== null) {
         try {
           wail.stop();
         } catch {
@@ -179,6 +206,40 @@ export function createAudio() {
         }
         wail = null;
         wailLevel = null;
+      }
+    },
+    // Looping rain hiss, driven by the weather system: 0 is silent.
+    rain(level) {
+      if (ctx === null || !live) return;
+      if (level > 0 && rainSrc === null) {
+        const len = ctx.sampleRate * 2;
+        const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < len; i += 1) data[i] = Math.random() * 2 - 1;
+        rainSrc = ctx.createBufferSource();
+        rainSrc.buffer = buffer;
+        rainSrc.loop = true;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 1200;
+        rainLevel = ctx.createGain();
+        rainLevel.gain.value = 0;
+        rainSrc.connect(filter);
+        filter.connect(rainLevel);
+        rainLevel.connect(ctx.destination);
+        rainSrc.start();
+      }
+      if (rainLevel !== null) {
+        rainLevel.gain.setTargetAtTime(level * 0.12 * volume, ctx.currentTime, 0.5);
+      }
+      if (level <= 0 && rainSrc !== null) {
+        try {
+          rainSrc.stop();
+        } catch {
+          // already stopped
+        }
+        rainSrc = null;
+        rainLevel = null;
       }
     },
     ...effects,

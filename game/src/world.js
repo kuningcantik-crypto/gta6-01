@@ -4,6 +4,9 @@
 // saving. The renderer only paints this state; it never decides it.
 import { BEST_KEY, CAR, CAR_NAMES, CITY, COMBAT, CREW, MISSIONS, PEDS, PLAYER, RADIO, TRAFFIC, WANTED, WEAPONS, districtAt } from './config.js';
 import { createRandom } from './random.js';
+import { createStashField, sweepStashes, STASH_REWARD_CASH, STASH_REWARD_RP } from './collectibles.js';
+import { createWeather, tickWeather, weatherChatter } from './weather.js';
+import { createTram, tickTram } from './tram.js';
 import { makeCar, placeTrafficCar, stepPlayerCar, stepPoliceCar, stepTrafficCar } from './vehicles.js';
 import { knockPedDown, makePed, stepPed } from './pedestrians.js';
 import { stepPlayerOnFoot } from './player.js';
@@ -11,7 +14,8 @@ import { advanceMission, currentMission, currentStep, sayLine, startStep, stepTa
 
 // True when a circle of radius r around (x, z) overlaps any building box.
 function overlapsBuilding(x, z, r, blocks) {
-  for (const block of blocks) {
+  for (let i = 0; i < blocks.length; i += 1) {
+    const block = blocks[i];
     const cx = Math.max(block.x0, Math.min(x, block.x1));
     const cz = Math.max(block.z0, Math.min(z, block.z1));
     const dx = x - cx;
@@ -25,11 +29,18 @@ function overlapsBuilding(x, z, r, blocks) {
 // can show real callsigns, distances and tactics.
 const CALLSIGNS = ['KITE-1', 'CORAL-48', 'BARRACUDA-18', 'GULL-8', 'BULWARK-2', 'TIDE-7'];
 export function unitName(car) {
-  if (car.roadblock) return `BULWARK-${car.unitNo || 2}`;
+  if (car.roadblock) return 'BULWARK-' + (car.unitNo || 2);
   return CALLSIGNS[(car.unitNo || 0) % CALLSIGNS.length];
 }
 
 function freshPlayer() {
+  const weapons = WEAPONS.map((w) => {
+    const copy = {...w};
+    copy.owned = w.unlockRp === 0;
+    copy.ammo = w.startAmmo || 0;
+    copy.mag = w.id === 'fists' ? Infinity : w.mag;
+    return copy;
+  });
   return {
     x: 0, z: 30, y: 0, vy: 0, angle: Math.PI,
     health: PLAYER.maxHealth, cash: PLAYER.startCash,
@@ -38,10 +49,7 @@ function freshPlayer() {
     reloadTimer: 0, shootTimer: 0, punchTimer: 0,
     bustedTimer: 0, moving: false, running: false, walkPhase: 0,
     rp: 0, radioStation: 0,
-    weapons: WEAPONS.map((w) => ({
-      ...w, owned: w.unlockRp === 0, ammo: w.startAmmo || 0,
-      mag: w.id === 'fists' ? Infinity : w.mag,
-    })),
+    weapons,
     weaponIndex: 1,
     garage: {tune: 0, armor: 0},
     crew: {plates: 0, fix: 0, eyes: 0},
@@ -57,23 +65,25 @@ function parkCars(state, rng) {
   const bays = [
     [-44, -100], [60, 60], [8, -52], [-96, 20], [112, -20], [-8, 130], [44, -130],
   ];
-  bays.forEach(([x, z], i) => {
+  for (let i = 0; i < bays.length; i += 1) {
+    const [x, z] = bays[i];
     // Parked cars sit parallel to the road: snap the random heading to
     // the nearest cardinal direction, so a stolen car drives down the
     // street instead of diagonally into the nearest building.
-    const heading = Math.round((rng.next() * Math.PI * 2) / (Math.PI / 2)) * (Math.PI / 2);
+    const drawn = rng.next() * Math.PI * 2;
+    const heading = Math.round(drawn / (Math.PI / 2)) * (Math.PI / 2);
     const car = makeCar('parked', PARKED_PAINT[i % PARKED_PAINT.length], x, z, heading, rng);
-    car.id = `parked-${state.cars.length}`;
+    car.id = 'parked-' + state.cars.length;
     car.name = CAR_NAMES[i % CAR_NAMES.length];
     car.condition = 100;
     state.cars.push(car);
-  });
+  }
 }
 
 function fillTraffic(state, rng) {
   for (let i = 0; i < TRAFFIC.count; i += 1) {
     const car = makeCar('traffic', TRAFFIC_PAINT[i % TRAFFIC_PAINT.length], 0, 0, 0, rng);
-    car.id = `traffic-${i}`;
+    car.id = 'traffic-' + i;
     car.name = CAR_NAMES[i % CAR_NAMES.length];
     car.condition = 100;
     placeTrafficCar(car, rng);
@@ -85,7 +95,9 @@ function scatterPickups(state) {
   const spots = [
     [-78, -52], [52, 26], [-26, 104], [104, 0], [-104, 78], [26, -104], [78, 130], [-130, -26],
   ];
-  for (const [x, z] of spots) state.pickups.push({x, z, taken: false, respawn: 0});
+  for (let i = 0; i < spots.length; i += 1) {
+    state.pickups.push({x: spots[i][0], z: spots[i][1], taken: false, respawn: 0});
+  }
 }
 
 // Lifetime numbers for the pause screen: money and respect earned, how
@@ -130,6 +142,9 @@ export function createWorld(seed) {
     missionsOpen: false,
     stats: freshStats(),
     tipsShown: {},
+    stashes: createStashField(rng),
+    weather: createWeather(),
+    tram: createTram(),
   };
   parkCars(state, rng);
   fillTraffic(state, rng);
@@ -140,7 +155,7 @@ export function createWorld(seed) {
 
 export function spawnFx(state, x, y, z, kind) {
   state.fx.push({x, y: y || 1, z, kind, t: 0});
-  if (state.fx.length > 24) state.fx.shift();
+  while (state.fx.length > 24) state.fx.shift();
 }
 
 export function addWanted(state, stars, audio) {
@@ -149,7 +164,8 @@ export function addWanted(state, stars, audio) {
   rico.wanted = Math.min(WANTED.maxStars, rico.wanted + stars);
   rico.crimeTimer = 0;
   const district = districtAt(rico.x, rico.z).name;
-  state.districtHeat[district] = Math.min(100, (state.districtHeat[district] || 0) + stars * 8);
+  const heat = state.districtHeat[district] || 0;
+  state.districtHeat[district] = Math.min(100, heat + stars * 8);
   if (rico.wanted > before && audio) audio.siren(true);
   if (before === 0 && rico.wanted > 0) showTip(state, 'wanted');
 }
@@ -164,7 +180,8 @@ function payCash(state, amount) {
   state.player.cash -= amount;
 }
 function takeFine(state, amount) {
-  state.player.cash = Math.max(0, state.player.cash - amount);
+  const left = state.player.cash - amount;
+  state.player.cash = left > 0 ? left : 0;
 }
 function earnRp(state, amount) {
   state.player.rp += amount;
@@ -174,9 +191,10 @@ function tellPlayer(state, text) {
   state.events.push({type: 'message', text});
 }
 function damageCar(car, amount) {
-  car.damage = (car.damage || 0) + amount;
-  car.condition = Math.max(0, 100 - (car.damage || 0));
-  return car.damage;
+  const total = (car.damage || 0) + amount;
+  car.damage = total;
+  car.condition = Math.max(0, 100 - total);
+  return total;
 }
 function mendCar(car) {
   car.damage = 0;
@@ -205,27 +223,26 @@ export function currentWeapon(state) {
 }
 
 export function unlockWeapons(state) {
-  for (const w of state.player.weapons) {
-    if (!w.owned && state.player.rp >= w.unlockRp) {
-      w.owned = true;
-      w.ammo = w.startAmmo || 0;
-      w.mag = w.mag;
-      tellPlayer(state, `Unlocked: ${w.name}! Press ${state.player.weapons.indexOf(w) + 1} to equip.`);
-      showTip(state, 'weapon');
-    }
+  for (let i = 0; i < state.player.weapons.length; i += 1) {
+    const w = state.player.weapons[i];
+    if (w.owned || state.player.rp < w.unlockRp) continue;
+    w.owned = true;
+    w.ammo = w.startAmmo || 0;
+    tellPlayer(state, 'Unlocked: ' + w.name + '! Press ' + (i + 1) + ' to equip.');
+    showTip(state, 'weapon');
   }
 }
 
 function closestCar(state, x, z, maxDist) {
   let best = null;
   let bestD = maxDist;
-  for (const car of state.cars) {
+  for (let i = 0; i < state.cars.length; i += 1) {
+    const car = state.cars[i];
     if (car.kind === 'player') continue;
     const d = Math.hypot(car.x - x, car.z - z);
-    if (d < bestD) {
-      best = car;
-      bestD = d;
-    }
+    if (d >= bestD) continue;
+    best = car;
+    bestD = d;
   }
   return best;
 }
@@ -233,13 +250,23 @@ function closestCar(state, x, z, maxDist) {
 function dispatchUnits(state, audio) {
   const rico = state.player;
   const wanted = Math.min(WANTED.maxPolice, rico.wanted * WANTED.policePerStar);
-  const onDuty = state.cars.filter((c) => c.kind === 'police' && !c.disabled && !c.roadblock).length;
+  let onDuty = 0;
+  for (let i = 0; i < state.cars.length; i += 1) {
+    const c = state.cars[i];
+    if (c.kind === 'police' && !c.disabled && !c.roadblock) onDuty += 1;
+  }
   for (let i = onDuty; i < wanted; i += 1) {
     const angle = state.rng.next() * Math.PI * 2;
     const x = rico.x + Math.sin(angle) * 70;
     const z = rico.z + Math.cos(angle) * 70;
-    const car = makeCar('police', 0x1c2b4a, Math.max(-CITY.half, Math.min(CITY.half, x)), Math.max(-CITY.half, Math.min(CITY.half, z)), angle, state.rng);
-    car.unitNo = state.cars.filter((c) => c.kind === 'police').length;
+    const clampedX = Math.max(-CITY.half, Math.min(CITY.half, x));
+    const clampedZ = Math.max(-CITY.half, Math.min(CITY.half, z));
+    const car = makeCar('police', 0x1c2b4a, clampedX, clampedZ, angle, state.rng);
+    let policeCount = 0;
+    for (let j = 0; j < state.cars.length; j += 1) {
+      if (state.cars[j].kind === 'police') policeCount += 1;
+    }
+    car.unitNo = policeCount;
     car.condition = 100;
     state.cars.push(car);
   }
@@ -254,7 +281,8 @@ function roadblockSpot(state) {
   const vertical = Math.abs(Math.sin(rico.angle)) > Math.abs(Math.cos(rico.angle));
   const along = vertical ? aheadX : aheadZ;
   let nearest = CITY.roads[0];
-  for (const r of CITY.roads) {
+  for (let i = 1; i < CITY.roads.length; i += 1) {
+    const r = CITY.roads[i];
     if (Math.abs(along - r) < Math.abs(along - nearest)) nearest = r;
   }
   return {road: nearest, vertical, aheadX, aheadZ};
@@ -262,7 +290,10 @@ function roadblockSpot(state) {
 
 function setRoadblocks(state) {
   const rico = state.player;
-  const blocks = state.cars.filter((c) => c.roadblock);
+  const blocks = [];
+  for (let i = 0; i < state.cars.length; i += 1) {
+    if (state.cars[i].roadblock) blocks.push(state.cars[i]);
+  }
   if (rico.wanted < 4) {
     if (blocks.length > 0) state.cars = state.cars.filter((c) => !c.roadblock);
     return;
@@ -274,12 +305,13 @@ function setRoadblocks(state) {
     car.roadblock = true;
     car.unitNo = 2 + i;
     car.condition = 100;
+    const offset = i === 0 ? -4 : 4;
     if (spot.vertical) {
       car.x = spot.road;
-      car.z = spot.aheadZ + (i === 0 ? -4 : 4);
+      car.z = spot.aheadZ + offset;
       car.angle = Math.PI / 2;
     } else {
-      car.x = spot.aheadX + (i === 0 ? -4 : 4);
+      car.x = spot.aheadX + offset;
       car.z = spot.road;
       car.angle = 0;
     }
@@ -303,8 +335,10 @@ function flyHelicopter(state) {
   }
   if (!heli.active) return;
   const t = state.time * 0.5;
-  heli.x += (rico.x + Math.sin(t) * 18 - heli.x) * 0.03;
-  heli.z += (rico.z + Math.cos(t) * 18 - heli.z) * 0.03;
+  const hoverX = rico.x + Math.sin(t) * 18;
+  const hoverZ = rico.z + Math.cos(t) * 18;
+  heli.x += (hoverX - heli.x) * 0.03;
+  heli.z += (hoverZ - heli.z) * 0.03;
   heli.angle = Math.atan2(rico.x - heli.x, rico.z - heli.z);
   heli.rotor += 0.35;
 }
@@ -312,7 +346,7 @@ function flyHelicopter(state) {
 function getInCar(state, audio) {
   const rico = state.player;
   const car = closestCar(state, rico.x, rico.z, 4);
-  if (!car) return false;
+  if (car === null) return false;
   if (car.kind === 'traffic') {
     addWanted(state, 1, audio);
     tellPlayer(state, 'Car stolen! The cops are on you.');
@@ -334,12 +368,14 @@ function getInCar(state, audio) {
 
 function getOutOfCar(state) {
   const rico = state.player;
-  if (!rico.car) return;
+  if (rico.car === null || rico.car === undefined) return;
   const car = rico.car;
   car.kind = 'parked';
   car.speed = 0;
-  rico.x = car.x + Math.sin(car.angle + Math.PI / 2) * 3;
-  rico.z = car.z + Math.cos(car.angle + Math.PI / 2) * 3;
+  const sideX = Math.sin(car.angle + Math.PI / 2) * 3;
+  const sideZ = Math.cos(car.angle + Math.PI / 2) * 3;
+  rico.x = car.x + sideX;
+  rico.z = car.z + sideZ;
   rico.angle = car.angle;
   rico.car = null;
   rico.onFoot = true;
@@ -358,7 +394,7 @@ function disableCruiser(state, car, audio) {
   unlockWeapons(state);
   tellPlayer(state, 'Police car disabled! +$50');
   const step = currentStep(state);
-  if (step && step.kind === 'eliminate') state.eliminated = (state.eliminated || 0) + 1;
+  if (step !== null && step.kind === 'eliminate') state.eliminated = (state.eliminated || 0) + 1;
   if (audio) audio.crash();
 }
 
@@ -379,15 +415,16 @@ function aimAt(state, camYaw, range) {
     const side = Math.abs(dx * dirZ - dz * dirX);
     if (along < 0 || side > 1.2 + dist * 0.05) return;
     const score = dist + side * 4;
-    if (score < bestScore) {
-      bestScore = score;
-      best = {kind, ref, dist};
-    }
+    if (score >= bestScore) return;
+    bestScore = score;
+    best = {kind, ref, dist};
   };
-  for (const ped of state.peds) {
+  for (let i = 0; i < state.peds.length; i += 1) {
+    const ped = state.peds[i];
     if (ped.state !== 'down') consider(ped.x, ped.z, 'ped', ped);
   }
-  for (const car of state.cars) {
+  for (let i = 0; i < state.cars.length; i += 1) {
+    const car = state.cars[i];
     if (car !== rico.car) consider(car.x, car.z, 'car', car);
   }
   return best;
@@ -395,13 +432,15 @@ function aimAt(state, camYaw, range) {
 
 function blowUpRpg(state, car, audio) {
   spawnFx(state, car.x, 1.5, car.z, 'explosion');
-  for (const other of state.cars) {
+  for (let i = 0; i < state.cars.length; i += 1) {
+    const other = state.cars[i];
     if (other === state.player.car) continue;
     if (Math.hypot(other.x - car.x, other.z - car.z) >= 9) continue;
     other.damage = (other.damage || 0) + 120;
     if (other.kind === 'police' && other.damage >= 100) disableCruiser(state, other, audio);
   }
-  for (const ped of state.peds) {
+  for (let i = 0; i < state.peds.length; i += 1) {
+    const ped = state.peds[i];
     if (Math.hypot(ped.x - car.x, ped.z - car.z) < 8) knockPedDown(ped);
   }
   addWanted(state, 2, audio);
@@ -420,7 +459,7 @@ function fireWeapon(state, camYaw, audio) {
       rico.reloadTimer = COMBAT.reloadSeconds;
       tellPlayer(state, 'Reloading…');
     } else {
-      tellPlayer(state, `${weapon.name} is dry — no reserve ammo.`);
+      tellPlayer(state, weapon.name + ' is dry — no reserve ammo.');
     }
     return;
   }
@@ -430,7 +469,7 @@ function fireWeapon(state, camYaw, audio) {
   if (audio) audio.shot();
   const range = weapon.id === 'sniper' ? 120 : COMBAT.range;
   const best = aimAt(state, camYaw, range);
-  if (!best) return;
+  if (best === null) return;
   if (best.kind === 'ped') {
     knockPedDown(best.ref);
     earnCash(state, 15);
@@ -464,24 +503,24 @@ function throwPunch(state, audio) {
   if (rico.punchTimer > 0) return;
   rico.punchTimer = 0.5;
   if (audio) audio.punch();
-  for (const ped of state.peds) {
+  for (let i = 0; i < state.peds.length; i += 1) {
+    const ped = state.peds[i];
     if (ped.state === 'down') continue;
-    if (Math.hypot(ped.x - rico.x, ped.z - rico.z) < 2.2) {
-      knockPedDown(ped);
-      earnCash(state, 15);
-      addWanted(state, 1, audio);
-      tellPlayer(state, 'Knocked out! +$15');
-      return;
-    }
+    if (Math.hypot(ped.x - rico.x, ped.z - rico.z) >= 2.2) continue;
+    knockPedDown(ped);
+    earnCash(state, 15);
+    addWanted(state, 1, audio);
+    tellPlayer(state, 'Knocked out! +$15');
+    return;
   }
 }
 
 function sendCourier(state) {
-  if (state.targetCar) return;
+  if (state.targetCar !== null && state.targetCar !== undefined) return;
   const step = currentStep(state);
-  const pos = (step && step.pos) || {x: 104, z: 52};
+  const pos = (step !== null && step.pos) || {x: 104, z: 52};
   const car = makeCar('traffic', 0xeeeeee, pos.x, pos.z, Math.PI / 2, state.rng);
-  car.id = `courier-${Math.floor(state.rng.next() * 1e9)}`;
+  car.id = 'courier-' + Math.floor(state.rng.next() * 1e9);
   car.name = 'COURIER COMET';
   car.target = true;
   car.damage = 0;
@@ -497,108 +536,113 @@ function sendCourier(state) {
 // inside one.
 function moveMissionOn(state, audio) {
   const result = advanceMission(state);
-  if (!audio) return result;
+  if (audio === null || audio === undefined) return result;
   if (result === 'mission') audio.mission();
   else audio.pickup();
   return result;
 }
 
-// One handler per step kind. Each gets the state, the audio handle, the
+// One branch per step kind. Each gets the state, the audio handle, the
 // step itself, Rico, and a "within radius" test — and returns nothing;
-// advancing is the handler's job.
+// advancing is the branch's job.
 let djLine = 0;
-
-const STEP_ACTIONS = {
-  goto(state, audio, step, rico, within) {
-    if (step.anyCar) {
-      if (rico.car) {
-        advanceMission(state);
-        if (audio) audio.mission();
-      }
-      return;
-    }
-    if (within(step.pos, 6)) moveMissionOn(state, audio);
-  },
-  timed(state, audio, step, rico, within) {
-    if (within(step.pos, 6)) moveMissionOn(state, audio);
-  },
-  collect(state, audio, step, rico, within) {
-    const spots = step.spots || [];
-    const spot = spots[state.missionCollected || 0];
-    if (!spot || !within(spot, 4)) return;
-    state.missionCollected += 1;
-    earnCash(state, 25);
-    if (audio) audio.pickup();
-    tellPlayer(state, `Package ${state.missionCollected}/${step.count} collected. +$25`);
-    if (state.missionCollected >= step.count) {
-      if (advanceMission(state) === 'mission' && audio) audio.mission();
-    }
-  },
-  wanted(state, audio, step, rico) {
-    if (rico.wanted >= step.stars) {
-      advanceMission(state);
-      if (audio) audio.pickup();
-    }
-  },
-  pickup(state, audio, step, rico, within) {
-    if (!within(step.pos, 4)) return;
-    state.passenger = true;
-    advanceMission(state);
-    if (audio) audio.pickup();
-    tellPlayer(state, 'Passenger aboard. Drive carefully.');
-  },
-  deliver(state, audio, step, rico, within) {
-    if (!state.passenger || !within(step.pos, 6)) return;
-    state.passenger = false;
-    if (advanceMission(state) === 'mission' && audio) audio.mission();
-  },
-  hold(state, audio, step, rico, within) {
-    if (!within(step.pos, 5)) {
-      state.missionHold = Math.max(0, state.missionHold - 1 / 60);
-      return;
-    }
-    state.missionHold += 1 / 60;
-    if (rico.wanted < 4) {
-      rico.wanted = 4;
-      rico.crimeTimer = 0;
-    }
-    if (state.missionHold < step.seconds) return;
-    earnCash(state, 200);
-    if (advanceMission(state) === 'mission' && audio) audio.mission();
-    tellPlayer(state, 'Vault cracked! +$200 — run!');
-  },
-  race(state, audio, step, rico, within) {
-    const checkpoints = step.checkpoints || [];
-    const cp = checkpoints[state.raceIndex || 0];
-    if (!cp || !within(cp, 7)) return;
-    state.raceIndex += 1;
-    if (audio) audio.pickup();
-    tellPlayer(state, `Gate ${state.raceIndex}/${checkpoints.length}!`);
-    if (state.raceIndex < checkpoints.length) return;
-    if (advanceMission(state) === 'mission' && audio) audio.mission();
-  },
-  ram(state, audio, step, rico) {
-    sendCourier(state);
-    const t = state.targetCar;
-    if (!t || !(t.disabled || (t.damage || 0) >= 100)) return;
-    earnCash(state, 150);
-    tellPlayer(state, 'Courier stopped! Cargo secured. +$150');
-    if (advanceMission(state) === 'mission' && audio) audio.mission();
-  },
-  eliminate(state, audio, step) {
-    if ((state.eliminated || 0) < step.count) return;
-    if (advanceMission(state) === 'mission' && audio) audio.mission();
-  },
-};
 
 function runStepLogic(state, audio) {
   const mission = currentMission(state);
   const step = currentStep(state);
-  if (!mission || !step) return;
+  if (mission === null || step === null) return;
   const rico = state.player;
-  const within = (pos, radius) => pos && Math.hypot(rico.x - pos.x, rico.z - pos.z) < radius;
-  const handler = STEP_ACTIONS[step.kind];
-  if (handler) handler(state, audio, step, rico, within);
+  const within = (pos, radius) => pos !== null && pos !== undefined && Math.hypot(rico.x - pos.x, rico.z - pos.z) < radius;
+  switch (step.kind) {
+    case 'goto': {
+      if (step.anyCar) {
+        if (rico.car) {
+          advanceMission(state);
+          if (audio) audio.mission();
+        }
+        break;
+      }
+      if (within(step.pos, 6)) moveMissionOn(state, audio);
+      break;
+    }
+    case 'timed': {
+      if (within(step.pos, 6)) moveMissionOn(state, audio);
+      break;
+    }
+    case 'collect': {
+      const spots = step.spots || [];
+      const spot = spots[state.missionCollected || 0];
+      if (spot === undefined || !within(spot, 4)) break;
+      state.missionCollected += 1;
+      earnCash(state, 25);
+      if (audio) audio.pickup();
+      tellPlayer(state, 'Package ' + state.missionCollected + '/' + step.count + ' collected. +$25');
+      if (state.missionCollected >= step.count && advanceMission(state) === 'mission' && audio) audio.mission();
+      break;
+    }
+    case 'wanted': {
+      if (rico.wanted >= step.stars) {
+        advanceMission(state);
+        if (audio) audio.pickup();
+      }
+      break;
+    }
+    case 'pickup': {
+      if (!within(step.pos, 4)) break;
+      state.passenger = true;
+      advanceMission(state);
+      if (audio) audio.pickup();
+      tellPlayer(state, 'Passenger aboard. Drive carefully.');
+      break;
+    }
+    case 'deliver': {
+      if (!state.passenger || !within(step.pos, 6)) break;
+      state.passenger = false;
+      if (advanceMission(state) === 'mission' && audio) audio.mission();
+      break;
+    }
+    case 'hold': {
+      if (!within(step.pos, 5)) {
+        state.missionHold = Math.max(0, state.missionHold - 1 / 60);
+        break;
+      }
+      state.missionHold += 1 / 60;
+      if (rico.wanted < 4) {
+        rico.wanted = 4;
+        rico.crimeTimer = 0;
+      }
+      if (state.missionHold < step.seconds) break;
+      earnCash(state, 200);
+      if (advanceMission(state) === 'mission' && audio) audio.mission();
+      tellPlayer(state, 'Vault cracked! +$200 — run!');
+      break;
+    }
+    case 'race': {
+      const checkpoints = step.checkpoints || [];
+      const cp = checkpoints[state.raceIndex || 0];
+      if (cp === undefined || !within(cp, 7)) break;
+      state.raceIndex += 1;
+      if (audio) audio.pickup();
+      tellPlayer(state, 'Gate ' + state.raceIndex + '/' + checkpoints.length + '!');
+      if (state.raceIndex >= checkpoints.length && advanceMission(state) === 'mission' && audio) audio.mission();
+      break;
+    }
+    case 'ram': {
+      sendCourier(state);
+      const t = state.targetCar;
+      if (t === null || t === undefined || !(t.disabled || (t.damage || 0) >= 100)) break;
+      earnCash(state, 150);
+      tellPlayer(state, 'Courier stopped! Cargo secured. +$150');
+      if (advanceMission(state) === 'mission' && audio) audio.mission();
+      break;
+    }
+    case 'eliminate': {
+      if ((state.eliminated || 0) >= step.count && advanceMission(state) === 'mission' && audio) audio.mission();
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 // Clocks and cooldowns: world time, weapon timers, reload, crime and
@@ -607,7 +651,9 @@ function tickClocks(state, dt) {
   const rico = state.player;
   state.time += dt;
   state.stats.timePlayed += dt;
-  const travelled = Math.hypot(rico.x - (state.stats.lastX ?? rico.x), rico.z - (state.stats.lastZ ?? rico.z));
+  const lastX = state.stats.lastX === null || state.stats.lastX === undefined ? rico.x : state.stats.lastX;
+  const lastZ = state.stats.lastZ === null || state.stats.lastZ === undefined ? rico.z : state.stats.lastZ;
+  const travelled = Math.hypot(rico.x - lastX, rico.z - lastZ);
   state.stats.distanceKm += travelled / 1000;
   state.stats.lastX = rico.x;
   state.stats.lastZ = rico.z;
@@ -619,53 +665,62 @@ function tickClocks(state, dt) {
     rico.reloadTimer -= dt;
     if (rico.reloadTimer <= 0) {
       const w = currentWeapon(state);
-      const magSize = WEAPONS[state.weaponIndex].mag;
+      const magSize = WEAPONS[state.player.weaponIndex].mag;
       const loaded = Math.min(magSize - w.mag, w.ammo);
       w.mag += loaded;
       w.ammo -= loaded;
     }
   }
   rico.crimeTimer += dt;
-  for (const k of Object.keys(rico.crew)) rico.crew[k] = Math.max(0, rico.crew[k] - dt);
+  for (const key of Object.keys(rico.crew)) {
+    const left = rico.crew[key] - dt;
+    rico.crew[key] = left > 0 ? left : 0;
+  }
   if (rico.eyesTimer > 0) rico.eyesTimer -= dt;
-  if (state.dialogue && state.dialogue.timer > 0) state.dialogue.timer -= dt;
+  if (state.dialogue !== null && state.dialogue !== undefined && state.dialogue.timer > 0) {
+    state.dialogue.timer -= dt;
+  }
   const step = currentStep(state);
-  if (step && (step.kind === 'race' || step.kind === 'timed') && step.seconds) {
+  const timedOut = step !== null && (step.kind === 'race' || step.kind === 'timed') && step.seconds;
+  if (timedOut) {
     state.missionTimer -= dt;
     if (state.missionTimer <= 0) {
       startStep(state);
       tellPlayer(state, 'Out of time — the job resets. Try again.');
     }
   }
-  for (const fx of state.fx) fx.t += dt;
+  for (let i = 0; i < state.fx.length; i += 1) state.fx[i].t += dt;
   state.fx = state.fx.filter((fx) => fx.t < 1.2);
 }
 
 // Weapon switching: number keys 1–7, Q cycles owned weapons, C changes radio.
 function readWeaponKeys(state, input, audio) {
   const rico = state.player;
-  for (let i = 0; i < 7; i += 1) {
-    if (!input.wasPressed(`w${i + 1}`)) continue;
-    const w = rico.weapons[i];
+  for (let slot = 0; slot < 7; slot += 1) {
+    if (!input.wasPressed('w' + (slot + 1))) continue;
+    const w = rico.weapons[slot];
     if (w.owned) {
-      rico.weaponIndex = i;
-      tellPlayer(state, `${w.name} equipped.`);
+      rico.weaponIndex = slot;
+      tellPlayer(state, w.name + ' equipped.');
     } else {
-      tellPlayer(state, `${w.name} is locked — reach ${w.unlockRp} RP.`);
+      tellPlayer(state, w.name + ' is locked — reach ' + w.unlockRp + ' RP.');
     }
   }
   if (input.wasPressed('cycleWeapon')) {
-    const owned = rico.weapons.map((w, i) => (w.owned ? i : -1)).filter((i) => i >= 0);
+    const owned = [];
+    for (let i = 0; i < rico.weapons.length; i += 1) {
+      if (rico.weapons[i].owned) owned.push(i);
+    }
     const at = owned.indexOf(rico.weaponIndex);
     rico.weaponIndex = owned[(at + 1) % owned.length];
-    tellPlayer(state, `${currentWeapon(state).name} equipped.`);
+    tellPlayer(state, currentWeapon(state).name + ' equipped.');
   }
   if (input.wasPressed('radio')) {
     rico.radioStation = (rico.radioStation + 1) % RADIO.length;
     if (audio) audio.setRadio(rico.radioStation);
     const station = RADIO[rico.radioStation];
-    tellPlayer(state, `♪ ${station.name} — ${station.genre}`);
-    if (station.lines && station.lines.length) {
+    tellPlayer(state, '♪ ' + station.name + ' — ' + station.genre);
+    if (station.lines && station.lines.length > 0) {
       const line = station.lines[djLine % station.lines.length];
       djLine += 1;
       sayLine(state, line, station.dj, 'DJ');
@@ -686,13 +741,15 @@ function readCrewKeys(state, input) {
     }
   }
   if (input.wasPressed('fix') && rico.crew.fix <= 0) {
-    if (rico.car && (rico.car.condition || 100) < 100 && rico.cash >= 50) {
+    const needsCar = rico.car === null || rico.car === undefined;
+    const needsCash = rico.car && (rico.car.condition || 100) < 100 && rico.cash >= 50;
+    if (needsCar) {
+      tellPlayer(state, 'Quick Fix needs a car.');
+    } else if (needsCash) {
       payCash(state, 50);
       mendCar(rico.car);
       rico.crew.fix = CREW[1].cooldown;
       tellPlayer(state, 'Lio patched the car up. -$50');
-    } else if (!rico.car) {
-      tellPlayer(state, 'Quick Fix needs a car.');
     }
   }
   if (input.wasPressed('eyes') && rico.crew.eyes <= 0) {
@@ -705,7 +762,8 @@ function readCrewKeys(state, input) {
 // Traffic cars drive their roads; the courier target car just drives its
 // own route. A car with a car ahead of it brakes instead of rear-ending it.
 function moveTraffic(state, dt) {
-  for (const car of state.cars) {
+  for (let i = 0; i < state.cars.length; i += 1) {
+    const car = state.cars[i];
     if (car.kind !== 'traffic') continue;
     if (car === state.targetCar) {
       stepTrafficCar(car, dt, state.rng);
@@ -716,7 +774,8 @@ function moveTraffic(state, dt) {
       continue;
     }
     let blocked = false;
-    for (const other of state.cars) {
+    for (let j = 0; j < state.cars.length; j += 1) {
+      const other = state.cars[j];
       if (other === car) continue;
       const dx = other.x - car.x;
       const dz = other.z - car.z;
@@ -744,7 +803,8 @@ function movePolice(state, dt, collide, audio) {
   flyHelicopter(state);
   let copTouching = false;
   let ramCount = 0;
-  for (const car of state.cars) {
+  for (let i = 0; i < state.cars.length; i += 1) {
+    const car = state.cars[i];
     if (car.kind !== 'police' || car.disabled || car.roadblock) continue;
     const hit = stepPoliceCar(car, rico.x, rico.z, dt, collide);
     if (hit) {
@@ -755,7 +815,8 @@ function movePolice(state, dt, collide, audio) {
     if (car.damage >= 100) disableCruiser(state, car, audio);
   }
   if (ramCount > 0 && rico.car) {
-    rico.health -= Math.min(3, ramCount * 1.0) * dt * (1 - 0.25 * rico.garage.armor);
+    const armorCut = 1 - 0.25 * rico.garage.armor;
+    rico.health -= Math.min(3, ramCount * 1.0) * dt * armorCut;
     rico.car.condition = Math.max(0, (rico.car.condition ?? 100) - ramCount * 0.4 * dt);
   }
   if (!copTouching && rico.onFoot) rico.bustedTimer = Math.max(0, rico.bustedTimer - dt * 2);
@@ -771,13 +832,15 @@ function movePolice(state, dt, collide, audio) {
 // trouble.
 function runAmbient(state, dt, audio) {
   const rico = state.player;
-  const threat = (rico.wanted > 0 || rico.car) && Math.abs(rico.car ? rico.car.speed : 0) > 4
-    ? {x: rico.x, z: rico.z} : null;
-  for (const ped of state.peds) {
-    const closeToThreat = threat && Math.hypot(ped.x - threat.x, ped.z - threat.z) < 18;
-    stepPed(ped, dt, state.rng, closeToThreat ? threat : null);
+  const speeding = rico.car !== null && rico.car !== undefined && Math.abs(rico.car.speed) > 4;
+  const threat = (rico.wanted > 0 || rico.car) && speeding ? {x: rico.x, z: rico.z} : null;
+  for (let i = 0; i < state.peds.length; i += 1) {
+    const ped = state.peds[i];
+    const nearThreat = threat !== null && Math.hypot(ped.x - threat.x, ped.z - threat.z) < 18;
+    stepPed(ped, dt, state.rng, nearThreat ? threat : null);
   }
-  for (const pickup of state.pickups) {
+  for (let i = 0; i < state.pickups.length; i += 1) {
+    const pickup = state.pickups[i];
     if (pickup.taken) {
       pickup.respawn -= dt;
       if (pickup.respawn <= 0) pickup.taken = false;
@@ -793,7 +856,8 @@ function runAmbient(state, dt, audio) {
     }
   }
   if (rico.health < 30 && rico.health > 0) showTip(state, 'health');
-  if (!state.garageOpen && Math.hypot(rico.x + 130, rico.z + 130) < 12) showTip(state, 'garage');
+  const nearGarage = Math.hypot(rico.x + 130, rico.z + 130) < 12;
+  if (!state.garageOpen && nearGarage) showTip(state, 'garage');
   if (rico.crimeTimer > WANTED.decayDelay) {
     rico.decayTimer += dt;
     if (rico.decayTimer >= WANTED.decayInterval && rico.wanted > 0) {
@@ -804,7 +868,9 @@ function runAmbient(state, dt, audio) {
   } else {
     rico.decayTimer = 0;
   }
-  if (rico.wanted === 0 && rico.health < PLAYER.maxHealth) rico.health = Math.min(PLAYER.maxHealth, rico.health + 2 * dt);
+  if (rico.wanted === 0 && rico.health < PLAYER.maxHealth) {
+    rico.health = Math.min(PLAYER.maxHealth, rico.health + 2 * dt);
+  }
   if (rico.health <= 0) {
     state.wasted = true;
     takeFine(state, 100);
@@ -814,9 +880,11 @@ function runAmbient(state, dt, audio) {
 // Pedestrians the player's car clips at speed go down — and it is a crime.
 function runOverPeds(state, audio, speedBefore) {
   const rico = state.player;
-  for (const ped of state.peds) {
+  for (let i = 0; i < state.peds.length; i += 1) {
+    const ped = state.peds[i];
     if (ped.state === 'down') continue;
-    if (Math.hypot(ped.x - rico.x, ped.z - rico.z) >= 2 || speedBefore <= 5) continue;
+    const near = Math.hypot(ped.x - rico.x, ped.z - rico.z) < 2;
+    if (!near || speedBefore <= 5) continue;
     knockPedDown(ped);
     state.stats.pedsDown += 1;
     addWanted(state, 1, audio);
@@ -828,7 +896,8 @@ function runOverPeds(state, audio, speedBefore) {
 // let the mission and police logic react to what got hit.
 function bumpCars(state, collide, audio) {
   const rico = state.player;
-  for (const car of state.cars) {
+  for (let i = 0; i < state.cars.length; i += 1) {
+    const car = state.cars[i];
     if (car === rico.car || car.kind === 'player') continue;
     const d = Math.hypot(car.x - rico.x, car.z - rico.z);
     if (d >= 3.4 || d <= 0.01) continue;
@@ -844,16 +913,19 @@ function bumpCars(state, collide, audio) {
     } else {
       car.x += nx * shove;
       car.z += nz * shove;
-      if (!collide(rico.car.x - nx * shove, rico.car.z - nz * shove, CAR.radius)) {
-        rico.car.x -= nx * shove;
-        rico.car.z -= nz * shove;
+      const backX = rico.car.x - nx * shove;
+      const backZ = rico.car.z - nz * shove;
+      if (!collide(backX, backZ, CAR.radius)) {
+        rico.car.x = backX;
+        rico.car.z = backZ;
         rico.x = rico.car.x;
         rico.z = rico.car.z;
       }
     }
     const impact = Math.abs(rico.car.speed) + Math.abs(car.speed || 0);
     rico.car.speed *= 0.6;
-    rico.car.condition = Math.max(0, (rico.car.condition ?? 100) - impact * 0.15);
+    const wear = (rico.car.condition ?? 100) - impact * 0.15;
+    rico.car.condition = Math.max(0, wear);
     if (car.kind === 'traffic') car.speed = Math.max(0, car.speed - 4);
     if (car === state.targetCar) {
       damageCar(car, impact * 1.6);
@@ -882,9 +954,14 @@ function bumpCars(state, collide, audio) {
 // in main.js: they must work while the world is frozen behind their
 // overlays.
 function driveOrWalk(ctx) {
-  const {state, input, dt, audio, camYaw, collide} = ctx;
+  const state = ctx.state;
+  const input = ctx.input;
+  const dt = ctx.dt;
+  const audio = ctx.audio;
+  const camYaw = ctx.camYaw;
+  const collide = ctx.collide;
   const rico = state.player;
-  if (!rico.car) {
+  if (rico.car === null || rico.car === undefined) {
     stepPlayerOnFoot(rico, input, dt, camYaw, collide);
     if (input.takeShoot()) fireWeapon(state, camYaw, audio);
     if (input.wasPressed('punch')) throwPunch(state, audio);
@@ -892,7 +969,8 @@ function driveOrWalk(ctx) {
     const speedBefore = Math.abs(rico.car.speed);
     const hardHit = stepPlayerCar(rico.car, input, dt, collide, rico.garage.tune);
     if (hardHit) {
-      rico.car.condition = Math.max(0, (rico.car.condition ?? 100) - 4);
+      const wear = (rico.car.condition ?? 100) - 4;
+      rico.car.condition = Math.max(0, wear);
       spawnFx(state, rico.car.x, 1, rico.car.z, 'crash');
       if (audio) audio.crash();
     }
@@ -902,8 +980,29 @@ function driveOrWalk(ctx) {
     runOverPeds(state, audio, speedBefore);
     bumpCars(state, collide, audio);
   }
-  if (input.wasPressed('reload') && currentWeapon(state).mag < WEAPONS[state.weaponIndex].mag && rico.reloadTimer <= 0) {
+  const weapon = currentWeapon(state);
+  const magFull = weapon.mag >= WEAPONS[state.player.weaponIndex].mag;
+  if (input.wasPressed('reload') && !magFull && rico.reloadTimer <= 0) {
     rico.reloadTimer = COMBAT.reloadSeconds;
+  }
+}
+
+// The living city: the sky turns, the trams loop, and hidden stashes
+// pay out when Rico walks over them. None of this touches missions or
+// wanted levels — it is the city breathing around the story.
+function tickWorldLife(state, dt, audio) {
+  const skyChanged = tickWeather(state.weather, dt, state.clockMinutes, state.rng);
+  if (skyChanged && state.weather.kind !== 'clear') {
+    tellPlayer(state, weatherChatter(state.weather.kind));
+  }
+  tickTram(state.tram, dt);
+  const found = sweepStashes(state.stashes, state.player.x, state.player.z);
+  for (const stash of found) {
+    earnCash(state, STASH_REWARD_CASH);
+    earnRp(state, STASH_REWARD_RP);
+    tellPlayer(state, `Hidden stash found! +$${STASH_REWARD_CASH} (+${STASH_REWARD_RP} RP)`);
+    spawnFx(state, stash.x, 1.2, stash.z, 'pickup');
+    if (audio) audio.pickup();
   }
 }
 
@@ -929,6 +1028,7 @@ const SYSTEMS = [
     runStepLogic(ctx.state, ctx.audio);
     unlockWeapons(ctx.state);
   },
+  function worldLife(ctx) { tickWorldLife(ctx.state, ctx.dt, ctx.audio); },
   function autosave(ctx) {
     ctx.state.saveTimer += ctx.dt;
     if (ctx.state.saveTimer > 15) {
@@ -1024,7 +1124,10 @@ const SAVE_SCALARS = [
 export function saveGame(state) {
   try {
     const data = {};
-    for (const [key, path] of SAVE_SCALARS) data[key] = readPath(state, path);
+    for (let i = 0; i < SAVE_SCALARS.length; i += 1) {
+      const [key, path] = SAVE_SCALARS[i];
+      data[key] = readPath(state, path);
+    }
     data.garage = state.player.garage;
     data.weapons = state.player.weapons.map((w) => ({owned: w.owned, ammo: w.ammo, mag: w.mag}));
     data.districtHeat = state.districtHeat;
@@ -1069,10 +1172,11 @@ export function loadGame() {
 }
 
 export function applySave(state, save) {
-  if (!save) return;
-  for (const [key, path, fallback] of SAVE_SCALARS) {
+  if (save === null || save === undefined) return;
+  for (let i = 0; i < SAVE_SCALARS.length; i += 1) {
+    const [key, path, fallback] = SAVE_SCALARS[i];
     const base = fallback === 'keep' ? readPath(state, path) : fallback;
-    const value = save[key] ?? base;
+    const value = save[key] === undefined || save[key] === null ? base : save[key];
     writePath(state, path, key === 'allMissionsDone' ? !!value : value);
   }
   if (save.garage) state.player.garage = {...state.player.garage, ...save.garage};
@@ -1080,13 +1184,13 @@ export function applySave(state, save) {
     for (let i = 0; i < save.weapons.length; i += 1) {
       const sw = save.weapons[i];
       const w = state.player.weapons[i];
-      if (!w || !sw) continue;
+      if (w === undefined || sw === undefined || sw === null) continue;
       w.owned = !!sw.owned;
-      w.ammo = sw.ammo ?? 0;
-      w.mag = sw.mag ?? w.mag;
+      w.ammo = sw.ammo === undefined || sw.ammo === null ? 0 : sw.ammo;
+      w.mag = sw.mag === undefined || sw.mag === null ? w.mag : sw.mag;
     }
   }
-  state.districtHeat = save.districtHeat ?? {};
+  state.districtHeat = save.districtHeat === undefined || save.districtHeat === null ? {} : save.districtHeat;
   startStep(state);
 }
 

@@ -13,6 +13,8 @@ import { makeCarMesh } from './vehicles.js';
 import { makePedMesh } from './pedestrians.js';
 import { makePlayerMesh } from './player.js';
 import { stepTarget } from './missions.js';
+import { skyDim } from './weather.js';
+import { tramPoses } from './tram.js';
 
 const POOL_SIZE = 300;
 
@@ -82,6 +84,104 @@ function makeParticlePool(scene) {
       if (alive) geo.attributes.position.needsUpdate = true;
     },
   };
+}
+
+// --- rain ----------------------------------------------------------------
+// A sheet of falling drops that follows the player, fading in with the
+// weather's rain level. One Points cloud, recycled in place.
+const RAIN_DROPS = 500;
+function makeRainPool(scene) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(RAIN_DROPS * 3);
+  for (let i = 0; i < RAIN_DROPS; i += 1) {
+    pos[i * 3] = (Math.random() - 0.5) * 70;
+    pos[i * 3 + 1] = Math.random() * 30;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * 70;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const material = new THREE.PointsMaterial({size: 0.18, color: 0x9ab8d9, transparent: true, opacity: 0, depthWrite: false});
+  const points = new THREE.Points(geo, material);
+  points.frustumCulled = false;
+  points.visible = false;
+  scene.add(points);
+  return {
+    setRain(level, cx, cz, dt) {
+      if (level <= 0.02) {
+        points.visible = false;
+        return;
+      }
+      points.visible = true;
+      material.opacity = Math.min(0.7, level * 0.7);
+      points.position.set(cx, 0, cz);
+      for (let i = 0; i < RAIN_DROPS; i += 1) {
+        let y = pos[i * 3 + 1] - 42 * dt;
+        if (y < 0) {
+          y = 28 + Math.random() * 4;
+          pos[i * 3] = (Math.random() - 0.5) * 70;
+          pos[i * 3 + 2] = (Math.random() - 0.5) * 70;
+        }
+        pos[i * 3 + 1] = y;
+      }
+      geo.attributes.position.needsUpdate = true;
+    },
+  };
+}
+
+// --- trams ---------------------------------------------------------------
+// A tram car: a long cream-and-teal box with a window band and a roof
+// rail, riding the loop the tram module defines.
+function makeTramMesh(line) {
+  const car = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(2.6, 2.4, 10),
+    new THREE.MeshLambertMaterial({color: 0xf2e3c6}),
+  );
+  body.position.y = 1.5;
+  body.castShadow = true;
+  car.add(body);
+  const band = new THREE.Mesh(
+    new THREE.BoxGeometry(2.7, 0.8, 9.2),
+    new THREE.MeshLambertMaterial({color: 0x14586e}),
+  );
+  band.position.y = 1.9;
+  car.add(band);
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(2.4, 0.25, 9.6),
+    new THREE.MeshLambertMaterial({color: 0x2b6fd9}),
+  );
+  roof.position.y = 2.85;
+  car.add(roof);
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 0.4, 0.1),
+    new THREE.MeshBasicMaterial({color: 0xffd76e}),
+  );
+  sign.position.set(0, 2.6, 5.05);
+  car.add(sign);
+  car.userData.line = line;
+  return car;
+}
+
+function paintTrams(figures, tram) {
+  const poses = tramPoses(tram);
+  poses.forEach((pose, i) => {
+    const mesh = figures[i];
+    if (!mesh) return;
+    mesh.position.set(pose.x, 0, pose.z);
+    mesh.rotation.y = pose.angle;
+    mesh.visible = true;
+  });
+}
+
+// Hidden stashes glow green and bob, like pickups but smaller and
+// greener — the hunt is a different game from the health crosses.
+function paintStashes(figures, stashes, time, dt) {
+  stashes.list.forEach((stash, i) => {
+    const mesh = figures[i];
+    if (!mesh) return;
+    mesh.visible = !stash.found;
+    mesh.rotation.y += dt * 1.5;
+    mesh.position.y = 0.6 + Math.sin(time * 2 + i * 1.7) * 0.12;
+  });
 }
 
 // --- per-frame sync ------------------------------------------------------
@@ -406,6 +506,21 @@ export function createRenderer(canvas, state) {
   const heli = makeHeli();
   scene.add(heli);
   const particles = makeParticlePool(scene);
+  const rain = makeRainPool(scene);
+  const tramFigures = state.tram.cars.map((car) => {
+    const mesh = makeTramMesh(car.line);
+    scene.add(mesh);
+    return mesh;
+  });
+  const stashFigures = state.stashes.list.map((stash) => {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.8, 0.5, 0.5),
+      new THREE.MeshLambertMaterial({color: 0x7dff9a, emissive: 0x1a5a2a}),
+    );
+    mesh.position.set(stash.x, 0.6, stash.z);
+    scene.add(mesh);
+    return mesh;
+  });
 
   // Muzzle flash light, reused for gunfire.
   const muzzleLight = new THREE.PointLight(0xffe9a8, 0, 30);
@@ -445,6 +560,8 @@ export function createRenderer(canvas, state) {
     },
     () => paintPeds(pedFigures, state.peds),
     (p, dt) => paintPickups(pickupFigures, state.pickups, state.time, dt),
+    (p, dt) => paintStashes(stashFigures, state.stashes, state.time, dt),
+    () => paintTrams(tramFigures, state.tram),
     (p, dt) => paintBeacon(beacon, diamond, state, dt),
     () => paintHeli(heli, state),
     () => paintWaterfront(scene, state.time),
@@ -494,6 +611,15 @@ export function createRenderer(canvas, state) {
         if (cloud.position.x > 260) cloud.position.x = -260;
       }
       if (muzzleLight.intensity > 0) muzzleLight.intensity = Math.max(0, muzzleLight.intensity - dt * 400);
+      // Weather on screen: the sun dims under cloud, rain falls around
+      // the player, and a lightning bolt flashes the whole frame.
+      const dim = skyDim(state.weather.kind);
+      sun.intensity = 3.0 * dim;
+      rain.setRain(state.weather.rain, p.x, p.z, dt);
+      if (state.weather.boltGlow > 0) {
+        muzzleLight.position.set(p.x, 30, p.z);
+        muzzleLight.intensity = Math.max(muzzleLight.intensity, state.weather.boltGlow * 140);
+      }
 
       aimCamera(camera, state, cameraYaw, mode, fixedCamera);
       // Shadow frustum follows the player (or the camera target on title).

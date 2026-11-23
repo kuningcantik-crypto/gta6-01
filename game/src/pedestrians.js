@@ -17,8 +17,10 @@ function personLimb(width, height, depth, material, x, y) {
 
 export function makePedMesh(rng) {
   const figure = new THREE.Group();
-  const skin = new THREE.MeshLambertMaterial({color: SKINS[Math.floor(rng.next() * SKINS.length)]});
-  const shirt = new THREE.MeshLambertMaterial({color: SHIRTS[Math.floor(rng.next() * SHIRTS.length)]});
+  const skinTone = SKINS[Math.floor(rng.next() * SKINS.length)];
+  const shirtTone = SHIRTS[Math.floor(rng.next() * SHIRTS.length)];
+  const skin = new THREE.MeshLambertMaterial({color: skinTone});
+  const shirt = new THREE.MeshLambertMaterial({color: shirtTone});
   const pants = new THREE.MeshLambertMaterial({color: 0x2b3242});
 
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), shirt);
@@ -45,11 +47,12 @@ export function makePed(rng) {
   const road = CITY.roads[Math.floor(rng.next() * CITY.roads.length)];
   const along = rng.range(-CITY.half + 10, CITY.half - 10);
   const horizontal = rng.next() < 0.5;
+  const speed = PEDS.walkSpeed * rng.range(0.8, 1.3);
   return {
     x: horizontal ? along : road + 8,
     z: horizontal ? road + 8 : along,
     angle: rng.next() * Math.PI * 2,
-    speed: PEDS.walkSpeed * rng.range(0.8, 1.3),
+    speed,
     state: 'walk',
     downTimer: 0,
     target: null,
@@ -74,7 +77,9 @@ function updatePedState(walker, dt, danger) {
     walker.state = 'flee';
     walker.speed = PEDS.fleeSpeed;
     walker.angle = Math.atan2(walker.x - danger.x, walker.z - danger.z);
-  } else if (walker.state === 'flee' && !danger) {
+    return false;
+  }
+  if (walker.state === 'flee' && !danger) {
     // A ped that stops fleeing keeps its running pace until it is
     // knocked down — nerves do not settle instantly in Solmar Bay.
     walker.state = 'walk';
@@ -84,12 +89,14 @@ function updatePedState(walker, dt, danger) {
 
 // Walk the sidewalk; at a crossing, sometimes turn onto the other one.
 export function stepPed(walker, dt, rng, danger) {
-  if (updatePedState(walker, dt, danger)) return;
+  const down = updatePedState(walker, dt, danger);
+  if (down) return;
   const pace = walker.state === 'flee' ? PEDS.fleeSpeed : walker.speed;
   walker.x += Math.sin(walker.angle) * pace * dt;
   walker.z += Math.cos(walker.angle) * pace * dt;
   walker.walkPhase += dt * pace * 3;
-  if (Math.abs(walker.x) > CITY.half || Math.abs(walker.z) > CITY.half) walker.angle += Math.PI;
+  const outOfTown = Math.abs(walker.x) > CITY.half || Math.abs(walker.z) > CITY.half;
+  if (outOfTown) walker.angle += Math.PI;
   const axisValue = Math.abs(Math.sin(walker.angle)) > 0.5 ? walker.x : walker.z;
   const crossing = CITY.roads.find((r) => Math.abs(axisValue - r) < 0.8);
   if (crossing !== undefined && rng.next() < dt * 0.2) {

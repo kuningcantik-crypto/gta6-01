@@ -11,29 +11,29 @@ export const ACTION_RELOAD = 'reload';
 export const ACTION_JUMP = 'jump';
 
 // Physical key to game action. Both WASD and the arrow keys drive.
-const BINDINGS = [
-  ['KeyW', 'up'], ['ArrowUp', 'up'],
-  ['KeyS', 'down'], ['ArrowDown', 'down'],
-  ['KeyA', 'left'], ['ArrowLeft', 'left'],
-  ['KeyD', 'right'], ['ArrowRight', 'right'],
-  ['ShiftLeft', 'run'], ['ShiftRight', 'run'],
-  ['Space', 'jump'],
-  ['KeyE', 'enter'],
-  ['KeyF', 'punch'],
-  ['KeyR', 'reload'],
-  ['Enter', 'confirm'],
-  ['Escape', 'pause'], ['KeyP', 'pause'],
-  ['Digit1', 'w1'], ['Digit2', 'w2'], ['Digit3', 'w3'], ['Digit4', 'w4'],
-  ['Digit5', 'w5'], ['Digit6', 'w6'], ['Digit7', 'w7'],
-  ['KeyQ', 'cycleWeapon'],
-  ['KeyC', 'radio'],
-  ['KeyZ', 'plates'],
-  ['KeyX', 'fix'],
-  ['KeyV', 'eyes'],
-  ['KeyG', 'garage'],
-  ['KeyM', 'missions'],
-];
-const KEYMAP = Object.fromEntries(BINDINGS);
+const KEYMAP = {
+  KeyW: 'up', ArrowUp: 'up',
+  KeyS: 'down', ArrowDown: 'down',
+  KeyA: 'left', ArrowLeft: 'left',
+  KeyD: 'right', ArrowRight: 'right',
+  ShiftLeft: 'run', ShiftRight: 'run',
+  Space: 'jump',
+  KeyE: 'enter',
+  KeyF: 'punch',
+  KeyR: 'reload',
+  Enter: 'confirm',
+  Escape: 'pause', KeyP: 'pause',
+  Digit1: 'w1', Digit2: 'w2', Digit3: 'w3', Digit4: 'w4',
+  Digit5: 'w5', Digit6: 'w6', Digit7: 'w7',
+  KeyQ: 'cycleWeapon',
+  KeyC: 'radio',
+  KeyZ: 'plates',
+  KeyX: 'fix',
+  KeyV: 'eyes',
+  KeyG: 'garage',
+  KeyM: 'missions',
+  KeyO: 'settings',
+};
 
 // The shared core: held flags, one-shot edges, the shoot pulse and the
 // mouse delta. Both the live keyboard input and the scripted test input
@@ -51,9 +51,9 @@ function makeInputCore() {
     held,
     edge,
     wasPressed(action) {
-      const hit = !!edge[action];
+      if (!edge[action]) return false;
       edge[action] = false;
-      return hit;
+      return true;
     },
     takeShoot() {
       const queued = shootPulse;
@@ -66,7 +66,7 @@ function makeInputCore() {
       return delta;
     },
     endFrame() {
-      for (const key of Object.keys(edge)) edge[key] = false;
+      for (const action of Object.keys(edge)) edge[action] = false;
     },
     setHeld(action, value) {
       held[action] = !!value;
@@ -87,18 +87,23 @@ function makeInputCore() {
   return core;
 }
 
+function releaseAllHeld(input) {
+  for (const action of Object.keys(input.held)) input.held[action] = false;
+}
+
 export function createInput(canvas) {
   const input = makeInputCore();
   window.addEventListener('keydown', (event) => {
     const action = KEYMAP[event.code];
-    if (!action) return;
-    if (!input.held[action]) input.edge[action] = true;
+    if (action === undefined) return;
+    const fresh = !input.held[action];
+    if (fresh) input.edge[action] = true;
     input.held[action] = true;
     if (action === 'jump' || action === 'pause') event.preventDefault();
   });
   window.addEventListener('keyup', (event) => {
     const action = KEYMAP[event.code];
-    if (action) input.held[action] = false;
+    if (action !== undefined) input.held[action] = false;
   });
   canvas.addEventListener('mousedown', (event) => {
     if (event.button === 0) input.queueShoot();
@@ -108,9 +113,7 @@ export function createInput(canvas) {
   });
   // Losing the window must release every key, or Rico keeps driving
   // forever when the player alt-tabs away mid-chase.
-  window.addEventListener('blur', () => {
-    for (const key of Object.keys(input.held)) input.held[key] = false;
-  });
+  window.addEventListener('blur', () => releaseAllHeld(input));
   return input;
 }
 
@@ -124,8 +127,8 @@ export function createScriptedInput() {
     input.held[action] = value;
   };
   input.clear = () => {
-    for (const key of Object.keys(input.held)) input.held[key] = false;
-    for (const key of Object.keys(input.edge)) input.edge[key] = false;
+    for (const action of Object.keys(input.held)) input.held[action] = false;
+    for (const action of Object.keys(input.edge)) input.edge[action] = false;
   };
   return input;
 }

@@ -21,8 +21,11 @@ export function createTouchControls(controls, callbacks) {
     controls.setHeld('left', stickVec.x < -0.18);
     controls.setHeld('right', stickVec.x > 0.18);
     // Shoving the stick to the edge on foot also means "run".
-    controls.setHeld('run', Math.hypot(stickVec.x, stickVec.y) > 0.85);
-    if (knob) knob.style.transform = `translate(${stickVec.x * 32}px, ${stickVec.y * 32}px)`;
+    const magnitude = Math.hypot(stickVec.x, stickVec.y);
+    controls.setHeld('run', magnitude > 0.85);
+    if (knob !== null) {
+      knob.style.transform = 'translate(' + stickVec.x * 32 + 'px, ' + stickVec.y * 32 + 'px)';
+    }
   }
 
   function trackStick(event) {
@@ -39,6 +42,7 @@ export function createTouchControls(controls, callbacks) {
     stickVec = {x: dx, y: dy};
     pushStickToInput();
   }
+
   function releaseStick(event) {
     if (activePointer !== event.pointerId) return;
     activePointer = null;
@@ -46,7 +50,7 @@ export function createTouchControls(controls, callbacks) {
     pushStickToInput();
   }
 
-  if (pad) {
+  if (pad !== null) {
     pad.addEventListener('pointerdown', (event) => {
       activePointer = event.pointerId;
       pad.setPointerCapture(event.pointerId);
@@ -88,9 +92,10 @@ export function createTouchControls(controls, callbacks) {
       event.preventDefault();
     });
   }
-  for (const [id, behaviour, action] of BUTTONS) {
+  for (let i = 0; i < BUTTONS.length; i += 1) {
+    const [id, behaviour, action] = BUTTONS[i];
     const button = document.getElementById(id);
-    if (!button) continue;
+    if (button === null) continue;
     if (behaviour === 'hold') wireHoldButton(button, action);
     else wireTapButton(button, action);
   }

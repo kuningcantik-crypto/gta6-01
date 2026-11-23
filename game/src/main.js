@@ -20,6 +20,7 @@ import { applySave, buyGarage, createWorld, loadGame, resetInPlace, saveGame, st
 import { currentMission, currentStep, stepTarget } from './missions.js';
 import { createTouchControls } from './touch.js';
 import { stageShot } from './shots.js';
+import { loadSettings, setSetting } from './settings.js';
 
 const params = new URLSearchParams(window.location.search);
 const shotName = params.get('shot');
@@ -32,6 +33,7 @@ const state = createWorld(seed);
 const renderer = createRenderer(canvas, state);
 const audio = createAudio();
 const input = shotName ? createScriptedInput() : createInput(canvas);
+let settings = loadSettings();
 
 let screen = 'title';
 let cameraYaw = state.player.angle;
@@ -84,6 +86,11 @@ function wakeAtHospital() {
   hud.showMessage('You woke up at St. Palma Hospital. The city is still yours.', 4);
 }
 
+function applySettings() {
+  audio.setVolume(settings.volume);
+  if (settings.quality === 'low') renderer.setQuality('low');
+}
+
 const hud = createHud(state, {
   onNewGame: () => beginGame(true),
   onContinue: () => beginGame(false),
@@ -96,11 +103,29 @@ const hud = createHud(state, {
   onFreeRoam: () => { screen = 'play'; },
   onGarageClose: () => { state.garageOpen = false; },
   onMissionsClose: () => { state.missionsOpen = false; },
+  onSettingsClose: () => { state.settingsOpen = false; },
+  onSetting: (key) => {
+    const cycles = {
+      quality: ['auto', 'high', 'low'],
+      volume: [0.8, 0.5, 1, 0.2],
+    };
+    if (cycles[key]) {
+      const options = cycles[key];
+      const next = options[(options.indexOf(settings[key]) + 1) % options.length];
+      settings = setSetting(settings, key, next);
+    } else {
+      settings = setSetting(settings, key, !settings[key]);
+    }
+    applySettings();
+    hud.setSettings(settings);
+  },
   onGarageBuy: (kind) => {
     hud.showGarageMessage(buyGarage(state, kind));
     saveGame(state);
   },
 });
+applySettings();
+hud.setSettings(settings);
 
 createTouchControls(input, {
   onCamera: () => { cameraYaw += Math.PI * 0.5; },
@@ -111,6 +136,7 @@ createTouchControls(input, {
 // supposed to close it. Only while playing, not on the title screen.
 function readOverlayKeys() {
   if (input.wasPressed('missions')) state.missionsOpen = !state.missionsOpen;
+  if (input.wasPressed('settings')) state.settingsOpen = !state.settingsOpen;
   if (input.wasPressed('garage')) {
     if (Math.hypot(state.player.x - CITY.safehouse.x, state.player.z - CITY.safehouse.z) < 10) {
       state.garageOpen = !state.garageOpen;
@@ -123,7 +149,8 @@ function readOverlayKeys() {
 // The camera follows the player's heading, nudged by mouse movement,
 // and only turns while the player is actually moving.
 function steerCamera(frameDt) {
-  cameraYaw -= input.takeMouseDX() * 0.0035;
+  const invert = settings.invertCamera ? -1 : 1;
+  cameraYaw -= input.takeMouseDX() * 0.0035 * invert;
   let diff = state.player.angle - cameraYaw;
   while (diff > Math.PI) diff -= Math.PI * 2;
   while (diff < -Math.PI) diff += Math.PI * 2;
@@ -159,8 +186,8 @@ function playFrame(frameDt) {
   if (screen === 'play') {
     readOverlayKeys();
     steerCamera(frameDt);
-    // Garage and job-list overlays freeze the world while open.
-    if (!state.garageOpen && !state.missionsOpen) {
+    // Garage, job-list and settings overlays freeze the world while open.
+    if (!state.garageOpen && !state.missionsOpen && !state.settingsOpen) {
       stepAccumulator += frameDt;
       while (stepAccumulator >= STEP) {
         stepWorld(state, input, STEP, audio, cameraYaw);
@@ -177,6 +204,7 @@ function playFrame(frameDt) {
     settleScreen();
     audio.engine(state.player.car ? Math.abs(state.player.car.speed) / 30 : 0, !!state.player.car);
     audio.siren(state.player.wanted > 0);
+    audio.rain(settings.weatherOn ? state.weather.rain : 0);
   } else if (screen === 'title') {
     state.time += frameDt;
     cameraYaw = state.player.angle;

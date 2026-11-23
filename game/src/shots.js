@@ -1,24 +1,38 @@
-// Screenshot scenes behind ?shot=start|play|chase|end. Each one plays the
-// real rules forward from a fresh world for a fixed number of seconds,
-// steered by a simple autopilot, so the frame is what a short session
-// really looks like — and the same seed always gives the same frame.
+// Screenshot scenes behind ?shot=start|play|chase|end. Each one plays
+// the real rules forward from a fresh world for a fixed number of
+// seconds, steered by a simple autopilot, so the frame is what a short
+// session really looks like — and the same seed always gives the same frame.
 import { STEP } from './config.js';
 import { stepWorld } from './world.js';
 
 function wrapAngle(a) {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
+  let out = a;
+  while (out > Math.PI) out -= Math.PI * 2;
+  while (out < -Math.PI) out += Math.PI * 2;
+  return out;
 }
 
 // How far along the waypoint list Rico is, and whether the car has
 // wedged itself: no movement at low speed for two seconds means stuck.
 function waypointProgress(car, waypoints, next, lastX, lastZ, stuckFor, dt) {
   const goal = waypoints[Math.min(next, waypoints.length - 1)];
-  if (Math.hypot(goal.x - car.x, goal.z - car.z) < 6 && next < waypoints.length - 1) next += 1;
+  let advanced = next;
+  if (Math.hypot(goal.x - car.x, goal.z - car.z) < 6 && next < waypoints.length - 1) advanced += 1;
   const moved = Math.hypot(car.x - lastX, car.z - lastZ);
   const stuck = moved < 0.05 && Math.abs(car.speed) < 1 ? stuckFor + dt : 0;
-  return {next, stuck};
+  return {next: advanced, stuck};
+}
+
+function steerToward(car, goal, input) {
+  const want = Math.atan2(goal.x - car.x, goal.z - car.z);
+  const diff = wrapAngle(want - car.angle);
+  // Only accelerate when roughly lined up and slow enough to turn, so
+  // the car stays on the road instead of swinging onto the sidewalk
+  // (and into pedestrians).
+  if (Math.abs(diff) < 0.35 && Math.abs(car.speed) < 22) input.set('up', true);
+  if (Math.abs(diff) > 0.35 && Math.abs(car.speed) > 5) input.set('down', true);
+  if (diff > 0.12) input.set('left', true);
+  else if (diff < -0.12) input.set('right', true);
 }
 
 // Steer a car through a list of road waypoints the way a player would.
@@ -32,7 +46,7 @@ function autopilotDrive(world, input, waypoints, seconds) {
   const total = Math.floor(seconds / STEP);
   for (let i = 0; i < total; i += 1) {
     const car = world.player.car;
-    if (!car) break;
+    if (car === null || car === undefined) break;
     const goal = waypoints[Math.min(next, waypoints.length - 1)];
     const progress = waypointProgress(car, waypoints, next, prevX, prevZ, stuckFor, STEP);
     next = progress.next;
@@ -46,15 +60,7 @@ function autopilotDrive(world, input, waypoints, seconds) {
       input.set('down', true);
       input.set('left', true);
     } else {
-      const want = Math.atan2(goal.x - car.x, goal.z - car.z);
-      const diff = wrapAngle(want - car.angle);
-      // Only accelerate when roughly lined up and slow enough to turn, so
-      // the car stays on the road instead of swinging onto the sidewalk
-      // (and into pedestrians).
-      if (Math.abs(diff) < 0.35 && Math.abs(car.speed) < 22) input.set('up', true);
-      if (Math.abs(diff) > 0.35 && Math.abs(car.speed) > 5) input.set('down', true);
-      if (diff > 0.12) input.set('left', true);
-      else if (diff < -0.12) input.set('right', true);
+      steerToward(car, goal, input);
     }
     stepWorld(world, input, STEP, null, car.angle);
     input.endFrame();
@@ -62,7 +68,8 @@ function autopilotDrive(world, input, waypoints, seconds) {
 }
 
 function seatPlayer(world, x, z, angle) {
-  const car = world.cars.find((c) => Math.hypot(c.x - x, c.z - z) < 6) || world.cars[0];
+  const nearby = world.cars.find((c) => Math.hypot(c.x - x, c.z - z) < 6);
+  const car = nearby === undefined ? world.cars[0] : nearby;
   car.kind = 'player';
   // Snap onto the road centreline, facing along it, so the autopilot
   // starts on tarmac instead of wedged against a building.
@@ -77,6 +84,11 @@ function seatPlayer(world, x, z, angle) {
   rico.z = car.z;
   rico.angle = car.angle;
   return car;
+}
+
+function runWorld(world, input, seconds, yaw) {
+  const total = Math.floor(seconds / STEP);
+  for (let i = 0; i < total; i += 1) stepWorld(world, input, STEP, null, yaw);
 }
 
 // A driving scene: stage the dialogue and the wanted level, seat Rico in
@@ -103,11 +115,14 @@ function drivingScene(world, input, spec) {
 // paint it. An unknown name falls back to the title scene.
 const SCENES = {
   play(world, input) {
+    // Eight seconds up one road: the car is still moving fast and clean
+    // when the frame is taken. Longer, and it catches the slow traffic
+    // ahead and spends the rest of the scene shunting back and forth.
     return drivingScene(world, input, {
       dialogue: ['Lucia', 'Fixer', 'Rico, welcome home. First rule of Solmar: wheels before words. Steal a car and meet me at the Neon Pier.'],
       carAt: [-52, -100, 0],
       waypoints: [{x: -52, z: 0}, {x: -52, z: 104}, {x: -52, z: 150}],
-      seconds: 22,
+      seconds: 8,
     });
   },
   chase(world, input) {
@@ -132,14 +147,14 @@ const SCENES = {
     world.player.x = 0;
     world.player.z = 188;
     world.player.angle = Math.PI;
-    for (let i = 0; i < 2 / STEP; i += 1) stepWorld(world, input, STEP, null, Math.PI);
+    runWorld(world, input, 2, Math.PI);
     return {
       screen: 'play', mode: 'fixed',
       fixedCamera: {x: 0, y: 5.5, z: 168, lookX: 0, lookY: 3, lookZ: 196},
     };
   },
   start(world, input) {
-    for (let i = 0; i < 3 / STEP; i += 1) stepWorld(world, input, STEP, null, Math.PI);
+    runWorld(world, input, 3, Math.PI);
     return {screen: 'title', mode: 'aerial', cameraYaw: 0};
   },
 };

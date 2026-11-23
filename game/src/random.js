@@ -1,22 +1,16 @@
-// Seeded dice for Solmar Bay. One stream per seed, so a given seed always
-// deals the same city, the same traffic and the same screenshots. The
-// stream is a xorshift32 generator warmed up at construction, which keeps
-// early draws from clustering near the seed value.
+// Seeded dice for Solmar Bay. One stream per seed, so a given seed
+// always deals the same city, the same traffic and the same screenshots.
+// The stream is splitmix32: a counter hashed with a few xors and
+// multiplies, which spreads nearby seeds far apart from the first draw.
 export function createRandom(seedValue) {
-  let word = (seedValue >>> 0) || 0x9e3779b9;
-  // Warm the state so the first draws do not betray the seed.
-  for (let i = 0; i < 8; i += 1) {
-    word ^= word << 13;
-    word ^= word >>> 17;
-    word ^= word << 5;
-    word >>>= 0;
-  }
+  let counter = (seedValue >>> 0) || 0x2545f491;
   function draw() {
-    word ^= word << 13;
-    word ^= word >>> 17;
-    word ^= word << 5;
-    word >>>= 0;
-    return word / 4294967296;
+    counter = (counter + 0x9e3779b9) >>> 0;
+    let word = counter;
+    word = Math.imul(word ^ (word >>> 16), 0x21f0aaad);
+    word = Math.imul(word ^ (word >>> 15), 0x735a2d97);
+    word ^= word >>> 15;
+    return (word >>> 0) / 4294967296;
   }
   const dice = {
     next: draw,

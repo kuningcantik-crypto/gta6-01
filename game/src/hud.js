@@ -7,6 +7,9 @@
 import { CITY, CREW, MISSIONS, RADIO, WANTED, districtAt, heatLabel, rankFor } from './config.js';
 import { currentMission, nextStepLabel, objectiveLabel, stepTarget } from './missions.js';
 import { loadBest, unitName } from './world.js';
+import { nextStashHint, stashProgress } from './collectibles.js';
+import { weatherLabel } from './weather.js';
+import { nearestTramStop } from './tram.js';
 
 function clockText(minutes) {
   const total = Math.floor(minutes);
@@ -44,10 +47,12 @@ export function createHud(state, callbacks) {
     dialogueName: $('dialogue-name'), dialogueText: $('dialogue-text'),
     message: $('message'), minimap: $('minimap'), crosshair: $('crosshair'),
     ticker: $('ticker'), pauseStats: $('pause-stats'),
+    stashLine: $('stash-line'), weatherChip: $('weather-chip'), tramLine: $('tram-line'), fpsLine: $('fps-line'),
+    settingsPanel: $('screen-settings'), settingsRows: $('settings-rows'),
     flash: $('flash'), flashTitle: $('flash-title'), flashReward: $('flash-reward'),
     screens: {title: $('screen-title'), pause: $('screen-pause'), wasted: $('screen-wasted'),
       busted: $('screen-busted'), complete: $('screen-complete'),
-      garage: $('screen-garage'), missions: $('screen-missions')},
+      garage: $('screen-garage'), missions: $('screen-missions'), settings: $('screen-settings')},
     titleCash: $('title-cash'), titleMission: $('title-mission'), titleBest: $('title-best'),
     finalCash: $('final-cash'), finalMissions: $('final-missions'),
     garageList: $('garage-list'), garageMsg: $('garage-msg'),
@@ -70,6 +75,8 @@ export function createHud(state, callbacks) {
   ];
   let tickerIndex = 0;
   let tickerTimer = 6;
+  let settings = null;
+  let fpsSmooth = 60;
   const cache = {};
   // Diagnostics handle for headless tests (backdrop-guard timing).
   window.__hudCache = cache;
@@ -352,6 +359,47 @@ export function createHud(state, callbacks) {
     setText('ticker', el.ticker, TICKER_LINES[tickerIndex]);
   }
 
+  // Stash hunt, weather and the nearest tram stop: the living city in
+  // three small lines under the district panel.
+  function refreshCityLife(rico) {
+    if (el.stashLine && state.stashes) {
+      const hint = nextStashHint(state.stashes);
+      setText('stash', el.stashLine, hint
+        ? `◆ STASHES ${stashProgress(state.stashes)} — next: ${hint}`
+        : `◆ STASHES ${stashProgress(state.stashes)} — all found!`);
+    }
+    if (el.weatherChip && state.weather) {
+      setText('wx', el.weatherChip, `☁ ${weatherLabel(state.weather)}${state.weather.rain > 0.05 ? ' · RAIN' : ''}`);
+    }
+    if (el.tramLine && state.tram) {
+      const stop = nearestTramStop(rico.x, rico.z);
+      setText('tram', el.tramLine, `🚋 TRAM — nearest stop ${stop.name} (${stop.dist} m)`);
+    }
+    if (el.fpsLine) {
+      el.fpsLine.style.display = settings && settings.showFps ? 'block' : 'none';
+      if (settings && settings.showFps) setText('fps', el.fpsLine, `${Math.round(fpsSmooth)} FPS`);
+    }
+    if (el.minimap) {
+      el.minimap.style.display = settings && settings.showMinimap === false ? 'none' : '';
+    }
+  }
+
+  // The settings overlay: one row per setting, each a button that cycles
+  // its value. Labels refresh from the live settings object.
+  function refreshSettingsLabels() {
+    if (!el.settingsRows || !settings) return;
+    const rows = [
+      ['quality', 'Quality', settings.quality.toUpperCase()],
+      ['volume', 'Volume', Math.round(settings.volume * 100) + '%'],
+      ['weatherOn', 'Weather', settings.weatherOn ? 'ON' : 'OFF'],
+      ['showMinimap', 'Minimap', settings.showMinimap ? 'ON' : 'OFF'],
+      ['showFps', 'FPS counter', settings.showFps ? 'ON' : 'OFF'],
+      ['invertCamera', 'Invert camera', settings.invertCamera ? 'ON' : 'OFF'],
+    ];
+    setHtml('setrows', el.settingsRows, rows.map(([key, label, value]) =>
+      `<div class="setting-row"><span>${label}</span><button data-setting="${key}">${value}</button></div>`).join(''));
+  }
+
   // Lifetime numbers on the pause screen, from state.stats.
   function refreshPauseStats() {
     if (!el.pauseStats || !state.stats) return;
@@ -362,7 +410,8 @@ export function createHud(state, callbacks) {
       '<div>Jobs done: ' + s.missionsDone + ' / ' + MISSIONS.length + '</div>' +
       '<div>Cash earned: $' + s.cashEarned.toLocaleString('en-US') + ' · Respect earned: ' + s.rpEarned + ' RP</div>' +
       '<div>Distance: ' + s.distanceKm.toFixed(1) + ' km · Time: ' + minutes + ':' + seconds + '</div>' +
-      '<div>Shots fired: ' + s.shotsFired + ' · Cruisers wrecked: ' + s.copsWrecked + ' · Pedestrians down: ' + s.pedsDown + '</div>');
+      '<div>Shots fired: ' + s.shotsFired + ' · Cruisers wrecked: ' + s.copsWrecked + ' · Pedestrians down: ' + s.pedsDown + '</div>' +
+      '<div>Hidden stashes: ' + (state.stashes ? state.stashes.found + ' / ' + state.stashes.total : '0 / 0') + '</div>');
   }
 
   function refreshScreens(dt, screen) {
@@ -375,8 +424,8 @@ export function createHud(state, callbacks) {
       cache.mapDrawn = true;
       paintMinimap();
     }
-    // Screens: garage / missions overlays sit above play.
-    const shown = state.garageOpen ? 'garage' : (state.missionsOpen ? 'missions' : screen);
+    // Screens: garage / missions / settings overlays sit above play.
+    const shown = state.settingsOpen ? 'settings' : (state.garageOpen ? 'garage' : (state.missionsOpen ? 'missions' : screen));
     if (shown !== cache.shown) {
       cache.shown = shown;
       // When an overlay opens under a finger, the same tap's click event
@@ -416,6 +465,7 @@ export function createHud(state, callbacks) {
         : '');
     }
     if (screen === 'pause') refreshPauseStats();
+    if (state.settingsOpen) refreshSettingsLabels();
     if (screen === 'complete') {
       setText('fcash', el.finalCash, `$${rico.cash.toLocaleString('en-US')}`);
       setText('fmiss', el.finalMissions, `${state.missionIndex} / ${MISSIONS.length} jobs done`);
@@ -424,6 +474,10 @@ export function createHud(state, callbacks) {
 
   function update(dt, screen) {
     const rico = state.player;
+    if (dt > 0) {
+      const instant = 1 / dt;
+      fpsSmooth = fpsSmooth * 0.92 + instant * 0.08;
+    }
     // The in-game HUD only exists during play; menus get a clean frame.
     el.hud.style.display = screen === 'play' ? 'block' : 'none';
     // The keyboard hint is a play aid, not a screenshot prop.
@@ -433,6 +487,7 @@ export function createHud(state, callbacks) {
     refreshMissionHeader();
     refreshDispatch(rico);
     refreshCrewAndDistrict(rico);
+    refreshCityLife(rico);
     refreshCarAndRadio(rico, screen);
     refreshDialogueAndFlash(dt);
     refreshTicker(dt);
@@ -452,6 +507,15 @@ export function createHud(state, callbacks) {
   bind('btn-free', () => callbacks.onFreeRoam());
   bind('btn-garage-close', () => callbacks.onGarageClose());
   bind('btn-missions-close', () => callbacks.onMissionsClose());
+  bind('btn-settings-close', () => callbacks.onSettingsClose());
+  // Settings rows are re-rendered by refreshSettingsLabels, so the click
+  // handler lives on the container and reads the button's data key.
+  if (el.settingsRows) {
+    el.settingsRows.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-setting]');
+      if (button) callbacks.onSetting(button.getAttribute('data-setting'));
+    });
+  }
   // Tapping the dimmed backdrop (not a button) also closes the overlays —
   // on touch the JOBS/GAS buttons sit under the overlay, so the backdrop
   // is the way out besides the Close button.
@@ -469,5 +533,8 @@ export function createHud(state, callbacks) {
     btn.addEventListener('click', () => callbacks.onGarageBuy(btn.getAttribute('data-garage')));
   }
 
-  return {update, showMessage, showGarageMessage};
+  return {
+    update, showMessage, showGarageMessage,
+    setSettings(next) { settings = next; refreshSettingsLabels(); },
+  };
 }

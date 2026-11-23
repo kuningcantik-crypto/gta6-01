@@ -27,8 +27,9 @@ You are **Rico Vane**, fresh out of the north with $120 and a name to make. Luci
 - **Live police** — a wanted system (1–5 stars) with a real SBPD dispatch panel: named units, distances and tactics, a helicopter with a spotlight cone at 3 stars, roadblocks at 4, and busted/wasted consequences.
 - **Driving** — carjacking, seven parked cars to steal, police cruisers to disable, garage upgrades at the safehouse (engine tune, armour, repairs, ammo) that persist with Rico.
 - **Combat** — seven weapons (fists to RPG) unlocked by respect rank, a respect ladder from Driver to Legend, and three crew abilities: clean plates, roadside repair, and police-vision.
-- **Radio** — four stations with named tracks, switched with C.
+- **Radio** — five stations with named tracks, switched with C.
 - **Mobile** — a virtual joystick plus GAS / BRKE / ACT / WPN / CAM / JOBS multi-touch buttons; the HUD reflows for phones.
+- **Living city** — twelve hidden cash stashes to hunt (the HUD hints at the next one), a weather system that turns the afternoon cloudy and the evening to rain and lightning, two trams looping the city on rails, and a settings panel (O) for quality, volume, weather, minimap, FPS counter and camera inversion.
 - **Performance** — instanced city geometry, a shadow frustum that follows the player, capped pixel ratio, and an automatic low-effects mode when frames stay slow.
 
 ## Controls
@@ -45,6 +46,7 @@ You are **Rico Vane**, fresh out of the north with $120 and a name to make. Luci
 | Z / X / V | Crew: clean plates / roadside repair / police-vision |
 | G | Garage (at the safehouse) |
 | M | Mission list |
+| O | Settings (quality, volume, weather, minimap, FPS, camera) |
 | Space | Jump |
 | Shift | Run |
 | Esc | Pause |
