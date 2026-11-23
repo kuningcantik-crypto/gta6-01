@@ -1,58 +1,72 @@
-// Weather over Solmar Bay: the day runs clear in the morning, clouds
-// roll in after lunch, and the evening can turn to rain and lightning
-// before clearing again at night. The schedule is driven by the in-game
-// clock, so a seeded run always sees the same sky at the same hour —
-// screenshots stay reproducible. Rain never touches the driving model;
-// it is light, sound and mood only.
+// Cuaca Solmar Bay: pagi cerah, siang berawan, sore hujan, dan malam
+// bisa badai petir sebelum kembali cerah menjelang subuh. Jadwalnya
+// mengikuti jam di dalam game, jadi run dengan seed yang sama selalu
+// melihat langit yang sama di jam yang sama — screenshot tetap bisa
+// direproduksi. Hujan hanya mengubah cahaya, suara, dan suasana; model
+// mengemudi tidak pernah ikut berubah.
 
 export const WEATHER_KINDS = ['clear', 'cloudy', 'rain', 'storm'];
 
-// Hour of day -> weather, as [hour, kind] boundaries. The bay is sunny
-// while Rico works the morning jobs, grey through the afternoon, and
-// wettest when the night missions start.
-const SKY_SCHEDULE = [
-  [0, 'clear'],
-  [14, 'cloudy'],
-  [18, 'rain'],
-  [20, 'storm'],
-  [23, 'clear'],
+// Fase langit sepanjang hari: tiap fase mulai pada jam tertentu dan
+// bertahan sampai fase berikutnya dimulai. Jam 23 kembali cerah agar
+// malam larut tetap terang bulan.
+const DAY_PHASES = [
+  {start: 0, kind: 'clear'},
+  {start: 14, kind: 'cloudy'},
+  {start: 18, kind: 'rain'},
+  {start: 20, kind: 'storm'},
+  {start: 23, kind: 'clear'},
 ];
 
 export function weatherForHour(hour) {
-  let kind = 'clear';
-  for (const [at, name] of SKY_SCHEDULE) {
-    if (hour >= at) kind = name;
+  let found = DAY_PHASES[0].kind;
+  for (let i = 0; i < DAY_PHASES.length; i += 1) {
+    if (hour >= DAY_PHASES[i].start) found = DAY_PHASES[i].kind;
   }
-  return kind;
+  return found;
 }
 
 export function createWeather() {
   return {
     kind: 'clear',
-    // 0 in dry weather, rising toward 1 as rain settles in.
+    // 0 saat kering, merangkak ke 1 selagi hujan membasahi jalan.
     wetness: 0,
-    // 0..1, how hard the rain is falling right now.
+    // 0..1, seberapa deras hujan turun saat ini.
     rain: 0,
-    // Seconds until the next lightning bolt; 0 means one fires now.
+    // Detik sampai petir berikutnya; 0 berarti petir menyambar sekarang.
     boltIn: 6,
-    // How bright the last bolt still is, fading back to 0.
+    // Seberapa terang kilat terakhir, memudar kembali ke 0.
     boltGlow: 0,
-    // Seconds the current sky has held, for smooth transitions.
+    // Berapa lama langit ini sudah bertahan, untuk transisi yang halus.
     heldFor: 0,
   };
 }
 
-// How much the sky dims the sun for a weather kind: clear is full sun,
-// storm is a heavy grey. The renderer lerps toward this.
+const DIM_PER_KIND = {storm: 0.45, rain: 0.6, cloudy: 0.8, clear: 1};
+
+// Seberapa redup matahari untuk satu jenis cuaca. Renderer melakukan
+// lerp menuju nilai ini, jadi pergantian langit tidak pernah mendadak.
 export function skyDim(kind) {
-  if (kind === 'storm') return 0.45;
-  if (kind === 'rain') return 0.6;
-  if (kind === 'cloudy') return 0.8;
-  return 1;
+  const dim = DIM_PER_KIND[kind];
+  return dim === undefined ? 1 : dim;
 }
 
-// Advance the weather by dt seconds at the given clock hour. Returns
-// true when the kind changed, so the caller can announce it once.
+function clamp01(v) {
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+function easeToward(now, goal, dt) {
+  const step = goal > now ? dt / 4 : dt / 8;
+  return now + Math.max(-step, Math.min(step, goal - now));
+}
+
+const RAIN_TARGET = {storm: 1, rain: 0.65, cloudy: 0, clear: 0};
+
+// Majukan cuaca sebesar dt detik pada jam tertentu. Mengembalikan true
+// saat jenis cuacanya berganti, supaya pemanggil bisa mengumumkannya
+// sekali saja.
 export function tickWeather(weather, dt, clockMinutes, rng) {
   const hour = Math.floor(clockMinutes / 60) % 24;
   const want = weatherForHour(hour);
@@ -63,12 +77,7 @@ export function tickWeather(weather, dt, clockMinutes, rng) {
     changed = true;
   }
   weather.heldFor += dt;
-  const targetRain = weather.kind === 'storm' ? 1 : weather.kind === 'rain' ? 0.65 : 0;
-  const rate = targetRain > weather.rain ? dt / 4 : dt / 8;
-  weather.rain += Math.max(-rate, Math.min(rate, targetRain - weather.rain));
-  weather.wetness += (targetRain > 0 ? dt / 20 : -dt / 40);
-  if (weather.wetness < 0) weather.wetness = 0;
-  if (weather.wetness > 1) weather.wetness = 1;
+  // Petir dulu: badai menghitung mundur ke sambaran berikutnya.
   if (weather.kind === 'storm') {
     weather.boltIn -= dt;
     if (weather.boltIn <= 0) {
@@ -76,21 +85,32 @@ export function tickWeather(weather, dt, clockMinutes, rng) {
       weather.boltIn = 4 + rng.next() * 9;
     }
   }
-  if (weather.boltGlow > 0) weather.boltGlow = Math.max(0, weather.boltGlow - dt * 2.2);
+  if (weather.boltGlow > 0) {
+    weather.boltGlow = Math.max(0, weather.boltGlow - dt * 2.2);
+  }
+  // Lalu hujan: deras naik cepat, reda pelan.
+  const goal = RAIN_TARGET[weather.kind];
+  weather.rain = easeToward(weather.rain, goal, dt);
+  // Jalan basah ikut: cepat basah saat hujan, kering pelan setelahnya.
+  const drying = goal > 0 ? dt / 20 : -dt / 40;
+  weather.wetness = clamp01(weather.wetness + drying);
   return changed;
 }
 
+const LABEL_PER_KIND = {storm: 'STORM', rain: 'RAIN', cloudy: 'CLOUDY', clear: 'CLEAR'};
+
 export function weatherLabel(weather) {
-  if (weather.kind === 'storm') return 'STORM';
-  if (weather.kind === 'rain') return 'RAIN';
-  if (weather.kind === 'cloudy') return 'CLOUDY';
-  return 'CLEAR';
+  return LABEL_PER_KIND[weather.kind] || 'CLEAR';
 }
 
-// A ticker line for the radio crawl when the sky turns.
+// Satu baris ticker radio saat langit berubah.
+const CHATTER_PER_KIND = {
+  storm: 'SBPD: "Storm over the bay — drive careful, Solmar."',
+  rain: 'SOLMAR WIRE — Rain moving in off the water.',
+  cloudy: 'SOLMAR WIRE — Clouds building over the plaza.',
+  clear: 'SOLMAR WIRE — Skies clearing over the bay.',
+};
+
 export function weatherChatter(kind) {
-  if (kind === 'storm') return 'SBPD: "Storm over the bay — drive careful, Solmar."';
-  if (kind === 'rain') return 'SOLMAR WIRE — Rain moving in off the water.';
-  if (kind === 'cloudy') return 'SOLMAR WIRE — Clouds building over the plaza.';
-  return 'SOLMAR WIRE — Skies clearing over the bay.';
+  return CHATTER_PER_KIND[kind] || CHATTER_PER_KIND.clear;
 }
